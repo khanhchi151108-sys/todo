@@ -1,0 +1,43 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Press+Start+2P&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gameBg text-gameText font-sans;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-gamePrimary hover:bg-red-500 text-white font-bold py-2 px-4 rounded transition-colors duration-200 shadow-[0_4px_14px_0_rgba(233,69,96,0.39)];
+  }
+  
+  .game-card {
+    @apply bg-gameCard rounded-lg p-4 border border-gameSecondary shadow-lg backdrop-blur-sm bg-opacity-80;
+  }
+  
+  .input-field {
+    @apply bg-gameBg border border-gameSecondary text-gameText text-sm rounded-lg focus:ring-gamePrimary focus:border-gamePrimary block w-full p-2.5 transition-colors duration-200 outline-none;
+  }
+}
+
+/* Custom Scrollbar for a sleek look */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1a2e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #0f3460;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #e94560;
+}
