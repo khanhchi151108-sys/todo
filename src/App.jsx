@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Check, Plus, Trash2, Edit2, LogOut, Sword, Shield, BookOpen, Dumbbell, Briefcase, ShoppingBag, Backpack, Sparkles, Heart } from 'lucide-react';
+import { Check, Plus, Trash2, Edit2, LogOut, Sword, Shield, BookOpen, Dumbbell, Briefcase, ShoppingBag, Backpack, Sparkles, Heart, Clock } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
 const ITEMS_DB = [
@@ -13,11 +13,14 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [inventory, setInventory] = useState([]);
+  
   const [newTask, setNewTask] = useState('');
   const [difficulty, setDifficulty] = useState('Vừa');
   const [tag, setTag] = useState('Học tập');
+  const [deadline, setDeadline] = useState('');
   const [editingTask, setEditingTask] = useState(null);
-  const [activeTab, setActiveTab] = useState('tasks'); // 'tasks', 'shop', 'inventory'
+  
+  const [activeTab, setActiveTab] = useState('tasks');
 
   // Load from local storage and Supabase
   useEffect(() => {
@@ -25,25 +28,82 @@ export default function App() {
     if (savedUser) {
       const parsedUser = JSON.parse(savedUser);
       setUser(parsedUser);
-      fetchData(parsedUser.name);
+      fetchData(parsedUser);
     }
   }, []);
 
-  const fetchData = async (username) => {
+  const fetchData = async (currentUser) => {
     // Fetch Tasks
     const { data: tasksData } = await supabase
       .from('tasks')
       .select('*')
-      .eq('user_id', username)
+      .eq('user_id', currentUser.name)
       .order('created_at', { ascending: false });
-    if (tasksData) setTasks(tasksData);
+      
+    if (tasksData) {
+      setTasks(tasksData);
+      checkOverdueTasks(tasksData, currentUser);
+    }
 
     // Fetch Inventory
     const { data: invData } = await supabase
       .from('inventory')
       .select('*')
-      .eq('user_id', username);
+      .eq('user_id', currentUser.name);
     if (invData) setInventory(invData.map(i => i.item_id));
+  };
+
+  const checkOverdueTasks = async (currentTasks, currentUser) => {
+    const now = new Date();
+    let hpPenalty = 0;
+    const tasksToPenalty = [];
+
+    const updatedTasks = currentTasks.map(task => {
+      if (!task.completed && !task.penalty_applied && task.deadline) {
+        const taskDeadline = new Date(task.deadline);
+        if (now > taskDeadline) {
+          hpPenalty += 10;
+          tasksToPenalty.push(task.id);
+          return { ...task, penalty_applied: true };
+        }
+      }
+      return task;
+    });
+
+    if (hpPenalty > 0) {
+      setTasks(updatedTasks);
+      
+      // Update Database tasks
+      for (const id of tasksToPenalty) {
+        await supabase.from('tasks').update({ penalty_applied: true }).eq('id', id);
+      }
+
+      // Update User HP
+      let newHp = (currentUser.hp || 100) - hpPenalty;
+      let newLevel = currentUser.level || 1;
+      let alertMsg = `Bạn bị trừ ${hpPenalty} HP do có ${tasksToPenalty.length} task quá hạn!`;
+
+      if (newHp <= 0) {
+        newHp = 100;
+        newLevel = Math.max(1, newLevel - 1);
+        alertMsg += `\n💀 Nhân vật đã kiệt sức. Bạn bị giáng xuống Cấp độ ${newLevel}.`;
+      }
+
+      const { data: updatedProfile } = await supabase
+        .from('profiles')
+        .update({ hp: newHp, level: newLevel })
+        .eq('username', currentUser.name)
+        .select()
+        .single();
+        
+      if (updatedProfile) {
+        const newUser = { ...currentUser, ...updatedProfile };
+        setUser(newUser);
+        localStorage.setItem('rpg_user', JSON.stringify(newUser));
+      }
+      
+      alert(alertMsg);
+    }
   };
 
   const syncProfile = async (username) => {
@@ -63,7 +123,7 @@ export default function App() {
       const newUser = { name: username, ...profile };
       setUser(newUser);
       localStorage.setItem('rpg_user', JSON.stringify(newUser));
-      fetchData(username);
+      fetchData(newUser);
     }
   };
 
@@ -95,31 +155,35 @@ export default function App() {
   const addTask = async (e) => {
     e.preventDefault();
     if (!newTask.trim()) return;
+    
+    const taskData = {
+      text: newTask,
+      difficulty,
+      tag,
+      deadline: deadline ? new Date(deadline).toISOString() : null
+    };
 
     if (editingTask) {
       const { data } = await supabase
         .from('tasks')
-        .update({ text: newTask, difficulty, tag })
+        .update(taskData)
         .eq('id', editingTask.id)
         .select()
         .single();
         
-      if (data) {
-        setTasks(tasks.map(t => t.id === editingTask.id ? data : t));
-      }
+      if (data) setTasks(tasks.map(t => t.id === editingTask.id ? data : t));
       setEditingTask(null);
     } else {
       const { data } = await supabase
         .from('tasks')
-        .insert([{ user_id: user.name, text: newTask, difficulty, tag }])
+        .insert([{ user_id: user.name, ...taskData }])
         .select()
         .single();
       
-      if (data) {
-        setTasks([data, ...tasks]);
-      }
+      if (data) setTasks([data, ...tasks]);
     }
     setNewTask('');
+    setDeadline('');
   };
 
   const toggleTask = async (task) => {
@@ -155,6 +219,14 @@ export default function App() {
     setNewTask(task.text);
     setDifficulty(task.difficulty);
     setTag(task.tag);
+    if (task.deadline) {
+      // Convert to local datetime format for input (YYYY-MM-DDThh:mm)
+      const d = new Date(task.deadline);
+      const localFormat = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().slice(0,16);
+      setDeadline(localFormat);
+    } else {
+      setDeadline('');
+    }
     setActiveTab('tasks');
   };
 
@@ -179,7 +251,6 @@ export default function App() {
       return;
     }
     
-    // Deduct gold
     await updateUserProfile({ gold: user.gold - item.price });
 
     if (item.consumable) {
@@ -189,7 +260,6 @@ export default function App() {
         alert(`Bạn đã dùng ${item.name} và hồi 20 HP!`);
       }
     } else {
-      // Add to inventory table
       const { data } = await supabase.from('inventory').insert([{ user_id: user.name, item_id: item.id }]).select().single();
       if (data) {
         setInventory([...inventory, item.id]);
@@ -220,6 +290,11 @@ export default function App() {
       case 'Công việc': return <Briefcase size={14} className="mr-1" />;
       default: return <Sword size={14} className="mr-1" />;
     }
+  };
+  
+  const formatDeadlineDisplay = (dateString) => {
+    const d = new Date(dateString);
+    return `${d.getHours()}:${d.getMinutes().toString().padStart(2, '0')} ${d.getDate()}/${d.getMonth()+1}`;
   };
 
   if (!user) {
@@ -259,16 +334,18 @@ export default function App() {
   }
 
   const expPercentage = Math.min((user.exp / (user.level * 100)) * 100, 100);
-  
-  // Find equipped item details
   const equippedItemDetails = ITEMS_DB.find(i => i.id === user.equipped_item);
   const EquippedIcon = equippedItemDetails ? equippedItemDetails.icon : null;
 
   return (
     <div className="min-h-screen p-4 md:p-8 max-w-4xl mx-auto">
       {/* Header Profile */}
-      <header className="mb-8 game-card flex flex-col md:flex-row justify-between items-center gap-4">
-        <div className="flex items-center gap-4 w-full md:w-auto relative">
+      <header className="mb-8 game-card flex flex-col md:flex-row justify-between items-center gap-4 relative overflow-hidden">
+        {/* Low HP Warning Glow */}
+        {user.hp <= 30 && (
+           <div className="absolute inset-0 bg-red-600 opacity-10 animate-pulse pointer-events-none rounded-lg"></div>
+        )}
+        <div className="flex items-center gap-4 w-full md:w-auto relative z-10">
           <div className="w-16 h-16 bg-gameSecondary rounded-full flex items-center justify-center border-2 border-gamePrimary shadow-[0_0_15px_rgba(233,69,96,0.5)] relative">
             <span className="font-rpg text-2xl text-gamePrimary">{user.name.charAt(0).toUpperCase()}</span>
             {EquippedIcon && (
@@ -280,13 +357,13 @@ export default function App() {
           <div className="flex-grow">
             <h2 className="font-bold text-2xl mb-1">{user.name}</h2>
             <div className="flex gap-4 text-sm font-bold">
-              <span className="text-gameGold font-rpg">🪙 {user.gold}</span>
-              <span className="text-red-500 font-rpg">❤️ {user.hp || 100}/100</span>
+              <span className="text-gameGold font-rpg flex items-center gap-1">🪙 {user.gold}</span>
+              <span className={`font-rpg flex items-center gap-1 ${user.hp <= 30 ? 'text-red-500 animate-pulse' : 'text-green-400'}`}>❤️ {user.hp || 100}/100</span>
             </div>
           </div>
         </div>
         
-        <div className="w-full md:w-1/3 flex flex-col gap-1">
+        <div className="w-full md:w-1/3 flex flex-col gap-1 z-10">
           <div className="flex justify-between font-rpg text-xs">
             <span className="text-gameExp">LVL {user.level}</span>
             <span>{user.exp} / {user.level * 100} EXP</span>
@@ -296,7 +373,7 @@ export default function App() {
           </div>
         </div>
         
-        <button onClick={handleLogout} className="text-gameText hover:text-gamePrimary transition-colors absolute top-4 right-4 md:static">
+        <button onClick={handleLogout} className="text-gameText hover:text-gamePrimary transition-colors absolute top-4 right-4 md:static z-10">
           <LogOut size={24} />
         </button>
       </header>
@@ -334,32 +411,39 @@ export default function App() {
                   value={newTask}
                   onChange={(e) => setNewTask(e.target.value)}
                   className="input-field flex-grow"
-                  placeholder="Thêm nhiệm vụ mới..."
+                  placeholder="Nhiệm vụ cần làm (Quest)..."
                 />
-                <div className="flex gap-2">
-                  <select 
-                    value={difficulty} 
-                    onChange={(e) => setDifficulty(e.target.value)}
-                    className="input-field w-auto cursor-pointer"
-                  >
-                    <option value="Dễ">Dễ</option>
-                    <option value="Vừa">Vừa</option>
-                    <option value="Khó">Khó</option>
-                  </select>
-                  <select 
-                    value={tag} 
-                    onChange={(e) => setTag(e.target.value)}
-                    className="input-field w-auto cursor-pointer"
-                  >
-                    <option value="Học tập">Học tập</option>
-                    <option value="Sức khỏe">Sức khỏe</option>
-                    <option value="Công việc">Công việc</option>
-                  </select>
-                </div>
+                <input 
+                  type="datetime-local" 
+                  value={deadline}
+                  onChange={(e) => setDeadline(e.target.value)}
+                  className="input-field w-auto"
+                  title="Deadline (Không bắt buộc)"
+                />
+              </div>
+              <div className="flex gap-2">
+                <select 
+                  value={difficulty} 
+                  onChange={(e) => setDifficulty(e.target.value)}
+                  className="input-field w-auto cursor-pointer"
+                >
+                  <option value="Dễ">Dễ</option>
+                  <option value="Vừa">Vừa</option>
+                  <option value="Khó">Khó</option>
+                </select>
+                <select 
+                  value={tag} 
+                  onChange={(e) => setTag(e.target.value)}
+                  className="input-field w-auto cursor-pointer"
+                >
+                  <option value="Học tập">Học tập</option>
+                  <option value="Sức khỏe">Sức khỏe</option>
+                  <option value="Công việc">Công việc</option>
+                </select>
               </div>
               <button type="submit" className="btn-primary w-full flex justify-center items-center gap-2">
                 {editingTask ? <Edit2 size={18} /> : <Plus size={18} />}
-                {editingTask ? 'Cập nhật nhiệm vụ' : 'Thêm nhiệm vụ'}
+                {editingTask ? 'Cập nhật nhiệm vụ' : 'Nhận nhiệm vụ mới'}
               </button>
             </form>
           </div>
@@ -369,55 +453,69 @@ export default function App() {
             <h3 className="font-rpg text-gamePrimary mb-4">Danh sách nhiệm vụ</h3>
             {tasks.length === 0 ? (
               <div className="text-center py-12 game-card border-dashed">
-                <p className="text-gameText opacity-50">Chưa có nhiệm vụ nào. Hãy nhận quest mới!</p>
+                <p className="text-gameText opacity-50">Bạn chưa có Quest nào. Hãy thêm để cày level!</p>
               </div>
             ) : (
-              tasks.map(task => (
-                <div 
-                  key={task.id} 
-                  className={`game-card flex items-center justify-between group transition-all duration-300 ${task.completed ? 'opacity-60 grayscale' : 'hover:scale-[1.01]'}`}
-                >
-                  <div className="flex items-center gap-4 flex-grow">
-                    <button 
-                      onClick={() => toggleTask(task)}
-                      className={`w-6 h-6 rounded flex items-center justify-center border-2 transition-colors ${
-                        task.completed 
-                          ? 'bg-gameExp border-gameExp text-white' 
-                          : 'border-gameSecondary hover:border-gamePrimary'
-                      }`}
-                    >
-                      {task.completed && <Check size={16} />}
-                    </button>
-                    <div className="flex-grow">
-                      <p className={`font-medium text-lg ${task.completed ? 'line-through' : ''}`}>
-                        {task.text}
-                      </p>
-                      <div className="flex gap-2 mt-1">
-                        <span className={`text-xs px-2 py-0.5 rounded border ${getDifficultyColor(task.difficulty)}`}>
-                          {task.difficulty}
-                        </span>
-                        <span className="text-xs px-2 py-0.5 rounded bg-gameSecondary text-gameText flex items-center">
-                          {getTagIcon(task.tag)} {task.tag}
-                        </span>
+              tasks.map(task => {
+                let isOverdue = false;
+                if (task.deadline && !task.completed) {
+                  isOverdue = new Date() > new Date(task.deadline);
+                }
+                
+                return (
+                  <div 
+                    key={task.id} 
+                    className={`game-card flex flex-col md:flex-row items-start md:items-center justify-between group transition-all duration-300 gap-4 ${task.completed ? 'opacity-60 grayscale' : 'hover:scale-[1.01]'} ${isOverdue ? 'border-red-500 shadow-[0_0_10px_rgba(255,0,0,0.2)]' : ''}`}
+                  >
+                    <div className="flex items-start md:items-center gap-4 flex-grow w-full">
+                      <button 
+                        onClick={() => toggleTask(task)}
+                        className={`mt-1 md:mt-0 min-w-6 w-6 h-6 rounded flex items-center justify-center border-2 transition-colors ${
+                          task.completed 
+                            ? 'bg-gameExp border-gameExp text-white' 
+                            : 'border-gameSecondary hover:border-gamePrimary'
+                        }`}
+                      >
+                        {task.completed && <Check size={16} />}
+                      </button>
+                      <div className="flex-grow">
+                        <p className={`font-medium text-lg ${task.completed ? 'line-through' : ''}`}>
+                          {task.text}
+                        </p>
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          <span className={`text-xs px-2 py-0.5 rounded border ${getDifficultyColor(task.difficulty)}`}>
+                            {task.difficulty}
+                          </span>
+                          <span className="text-xs px-2 py-0.5 rounded bg-gameSecondary text-gameText flex items-center">
+                            {getTagIcon(task.tag)} {task.tag}
+                          </span>
+                          {task.deadline && (
+                            <span className={`text-xs px-2 py-0.5 rounded flex items-center gap-1 ${isOverdue ? 'bg-red-500/20 text-red-400 border border-red-500' : 'bg-gameSecondary text-gray-300'}`}>
+                              <Clock size={12} />
+                              {formatDeadlineDisplay(task.deadline)}
+                              {isOverdue && ' (Quá hạn)'}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
+                    <div className="flex gap-2 self-end md:self-auto opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={() => editTask(task)}
+                        className="p-2 text-gameEasy hover:bg-gameSecondary rounded transition-colors"
+                      >
+                        <Edit2 size={18} />
+                      </button>
+                      <button 
+                        onClick={() => deleteTask(task.id)}
+                        className="p-2 text-gamePrimary hover:bg-gameSecondary rounded transition-colors"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button 
-                      onClick={() => editTask(task)}
-                      className="p-2 text-gameEasy hover:bg-gameSecondary rounded transition-colors"
-                    >
-                      <Edit2 size={18} />
-                    </button>
-                    <button 
-                      onClick={() => deleteTask(task.id)}
-                      className="p-2 text-gamePrimary hover:bg-gameSecondary rounded transition-colors"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </>
@@ -473,7 +571,6 @@ export default function App() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Unique items from inventory list */}
               {Array.from(new Set(inventory)).map(itemId => {
                 const item = ITEMS_DB.find(i => i.id === itemId);
                 if (!item) return null;
