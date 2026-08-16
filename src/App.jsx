@@ -5,12 +5,18 @@ import SidebarProfile from './components/SidebarProfile';
 import TaskList from './components/TaskList';
 import Shop from './components/Shop';
 import Inventory from './components/Inventory';
+import PomodoroTimer from './components/PomodoroTimer';
+import Gacha from './components/Gacha';
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [activeTab, setActiveTab] = useState('tasks');
+  
+  // Modals state
+  const [showPomodoro, setShowPomodoro] = useState(false);
+  const [showGacha, setShowGacha] = useState(false);
 
   useEffect(() => {
     const savedUser = localStorage.getItem('rpg_user');
@@ -48,8 +54,6 @@ export default function App() {
     const tasksToUpdate = [];
 
     const updatedTasks = currentTasks.map(task => {
-      // Logic Soft Delete: move to history if completed > 3 days ago or completed in general
-      // For V2.1, we move completed tasks to 'history' immediately (or via a cron job, but we do it here for MVP).
       if (task.completed && task.status !== 'history') {
         tasksToUpdate.push({ id: task.id, status: 'history' });
         return { ...task, status: 'history' };
@@ -69,36 +73,30 @@ export default function App() {
     if (hpPenalty > 0 || tasksToUpdate.length > 0) {
       setTasks(updatedTasks);
       
-      // Update DB Tasks
       for (const update of tasksToUpdate) {
         await supabase.from('tasks').update(update).eq('id', update.id);
       }
 
-      // Apply HP Penalty
       if (hpPenalty > 0) {
-        let newHp = (currentUser.hp || 100) - hpPenalty;
-        let newLevel = currentUser.level || 1;
-        let alertMsg = `Bạn bị trừ ${hpPenalty} HP do có task quá hạn!`;
+        // Check for streak freeze
+        if (currentUser.frozen_days > 0) {
+          alert('Bình Đóng Băng đã phát huy tác dụng! Bạn không bị trừ HP và giữ nguyên Chuỗi ngày.');
+          const newFrozen = currentUser.frozen_days - 1;
+          await updateUserProfile({ frozen_days: newFrozen });
+        } else {
+          let newHp = (currentUser.hp || 100) - hpPenalty;
+          let newLevel = currentUser.level || 1;
+          let alertMsg = `Bạn bị trừ ${hpPenalty} HP do có task quá hạn!`;
 
-        if (newHp <= 0) {
-          newHp = 100;
-          newLevel = Math.max(1, newLevel - 1);
-          alertMsg += `\n💀 Nhân vật đã kiệt sức. Bị giáng xuống Cấp độ ${newLevel}.`;
-        }
+          if (newHp <= 0) {
+            newHp = 100;
+            newLevel = Math.max(1, newLevel - 1);
+            alertMsg += `\n💀 Nhân vật đã kiệt sức. Bị giáng xuống Cấp độ ${newLevel}.`;
+          }
 
-        const { data: updatedProfile } = await supabase
-          .from('profiles')
-          .update({ hp: newHp, level: newLevel, streak: 0 }) // Reset streak on HP penalty
-          .eq('username', currentUser.name)
-          .select()
-          .single();
-          
-        if (updatedProfile) {
-          const newUser = { ...currentUser, ...updatedProfile };
-          setUser(newUser);
-          localStorage.setItem('rpg_user', JSON.stringify(newUser));
+          await updateUserProfile({ hp: newHp, level: newLevel, streak: 0 });
+          alert(alertMsg);
         }
-        alert(alertMsg);
       }
     }
   };
@@ -131,13 +129,17 @@ export default function App() {
     localStorage.removeItem('rpg_user');
   };
 
-  const calculateReward = (diff) => {
+  const calculateReward = (diff, isDoubleXp) => {
+    let exp = 25;
+    let gold = 15;
     switch (diff) {
-      case 'Dễ': return { exp: 10, gold: 5 };
-      case 'Vừa': return { exp: 25, gold: 15 };
-      case 'Khó': return { exp: 50, gold: 30 };
-      default: return { exp: 25, gold: 15 };
+      case 'Dễ': exp = 10; gold = 5; break;
+      case 'Khó': exp = 50; gold = 30; break;
     }
+    if (isDoubleXp) {
+      exp *= 2;
+    }
+    return { exp, gold };
   };
 
   const handleLevelUp = async (currentExp, currentLevel) => {
@@ -197,12 +199,19 @@ export default function App() {
       setTasks(tasks.map(t => t.id === task.id ? data : t));
       
       if (newCompleted) {
-        const reward = calculateReward(task.difficulty);
+        const reward = calculateReward(task.difficulty, user.double_xp);
         let newExp = user.exp + reward.exp;
         let newGold = user.gold + reward.gold;
         let newLevel = await handleLevelUp(newExp, user.level);
         
-        updateUserProfile({ exp: newExp, gold: newGold, level: newLevel });
+        let newStreak = (user.streak || 0) + 1; // Increase streak
+        
+        const updates = { exp: newExp, gold: newGold, level: newLevel, streak: newStreak };
+        if (user.double_xp) {
+          updates.double_xp = false; // Turn off double XP after one use
+          alert('Nhân đôi XP đã được áp dụng!');
+        }
+        updateUserProfile(updates);
       }
     }
   };
@@ -237,6 +246,14 @@ export default function App() {
         const newHp = Math.min(100, (user.hp || 100) + 20);
         await updateUserProfile({ hp: newHp });
         alert(`Bạn đã dùng ${item.name} và hồi 20 HP!`);
+      } else if (item.id === 'streak_freeze') {
+        const newFrozen = (user.frozen_days || 0) + 1;
+        await updateUserProfile({ frozen_days: newFrozen });
+        alert('Đã kích hoạt Bình Đóng Băng! Bạn được bảo vệ Streak thêm 1 ngày.');
+      } else if (item.id === 'focus_potion') {
+        setShowPomodoro(true);
+      } else if (item.id === 'gacha_ticket') {
+        setShowGacha(true);
       }
     } else {
       const { data } = await supabase.from('inventory').insert([{ user_id: user.name, item_id: item.id }]).select().single();
@@ -281,7 +298,31 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen bg-[#1a1a2e] text-gameText p-4 md:p-6 overflow-hidden flex flex-col">
+    <div className="h-screen bg-[#1a1a2e] text-gameText p-4 md:p-6 overflow-hidden flex flex-col relative">
+      {/* Modals */}
+      {showPomodoro && (
+        <PomodoroTimer 
+          user={user} 
+          onClose={() => setShowPomodoro(false)} 
+          onComplete={(updatedProfile) => {
+            setShowPomodoro(false);
+            setUser({ ...user, ...updatedProfile });
+            localStorage.setItem('rpg_user', JSON.stringify({ ...user, ...updatedProfile }));
+          }} 
+        />
+      )}
+      
+      {showGacha && (
+        <Gacha 
+          user={user} 
+          onClose={() => setShowGacha(false)}
+          onReward={(updatedProfile) => {
+            setUser({ ...user, ...updatedProfile });
+            localStorage.setItem('rpg_user', JSON.stringify({ ...user, ...updatedProfile }));
+          }}
+        />
+      )}
+
       <div className="flex flex-col md:flex-row gap-6 h-full max-w-7xl mx-auto w-full">
         
         {/* Left Panel: Profile */}
@@ -340,7 +381,6 @@ export default function App() {
             )}
           </div>
         </div>
-
       </div>
     </div>
   );
