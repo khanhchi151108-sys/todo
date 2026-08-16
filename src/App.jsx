@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Sword, Shield, BookOpen, ShoppingBag, Backpack, History } from 'lucide-react';
+import { Sword, Shield, BookOpen, ShoppingBag, Backpack, History, Users } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import SidebarProfile from './components/SidebarProfile';
 import TaskList from './components/TaskList';
@@ -7,6 +7,7 @@ import Shop from './components/Shop';
 import Inventory from './components/Inventory';
 import PomodoroTimer from './components/PomodoroTimer';
 import Gacha from './components/Gacha';
+import Social from './components/Social';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -151,6 +152,18 @@ export default function App() {
     return currentLevel;
   };
 
+  const dealBossDamage = async () => {
+    // Basic implementation for Boss fight MVP
+    const { data: boss } = await supabase.from('world_boss').select('*').limit(1).single();
+    if (boss && boss.hp > 0) {
+      const newHp = Math.max(0, boss.hp - 10);
+      await supabase.from('world_boss').update({ hp: newHp }).eq('id', boss.id);
+      if (newHp === 0 && boss.hp > 0) {
+        alert('🎉 BOSS THẾ GIỚI ĐÃ BỊ TIÊU DIỆT! Toàn server nhận được phần thưởng vinh quang!');
+      }
+    }
+  };
+
   const addTask = async (taskData) => {
     if (taskData.id) {
       const { data } = await supabase
@@ -212,6 +225,9 @@ export default function App() {
           alert('Nhân đôi XP đã được áp dụng!');
         }
         updateUserProfile(updates);
+        
+        // Attack Boss
+        dealBossDamage();
       }
     }
   };
@@ -341,10 +357,10 @@ export default function App() {
               <BookOpen size={16} /> Nhiệm vụ
             </button>
             <button 
-              onClick={() => setActiveTab('history')}
-              className={`px-4 py-2 rounded flex gap-2 items-center font-bold transition-all text-sm ${activeTab === 'history' ? 'bg-gray-600 text-white shadow-lg' : 'text-gameText hover:bg-gameSecondary'}`}
+              onClick={() => setActiveTab('social')}
+              className={`px-4 py-2 rounded flex gap-2 items-center font-bold transition-all text-sm ${activeTab === 'social' ? 'bg-purple-600 text-white shadow-lg' : 'text-gameText hover:bg-gameSecondary'}`}
             >
-              <History size={16} /> Lịch sử
+              <Users size={16} /> Cộng đồng
             </button>
             <button 
               onClick={() => setActiveTab('shop')}
@@ -358,6 +374,12 @@ export default function App() {
             >
               <Backpack size={16} /> Túi đồ
             </button>
+            <button 
+              onClick={() => setActiveTab('history')}
+              className={`px-4 py-2 rounded flex gap-2 items-center font-bold transition-all text-sm ml-auto ${activeTab === 'history' ? 'bg-gray-600 text-white shadow-lg' : 'text-gray-400 hover:bg-gameSecondary'}`}
+            >
+              <History size={16} /> Lịch sử
+            </button>
           </div>
 
           {/* Content Area */}
@@ -370,6 +392,10 @@ export default function App() {
                 deleteTask={deleteTask} 
                 activeTab={activeTab}
               />
+            )}
+
+            {activeTab === 'social' && (
+              <Social user={user} />
             )}
             
             {activeTab === 'shop' && (
