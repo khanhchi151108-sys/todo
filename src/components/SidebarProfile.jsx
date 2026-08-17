@@ -1,10 +1,12 @@
-import { LogOut, Sparkles, Mail } from 'lucide-react';
+import { LogOut, Sparkles, Mail, ShieldAlert } from 'lucide-react';
 import { ITEMS_DB } from '../data/items';
+import { checkIsAdmin } from '../lib/adminAuth';
 
 export default function SidebarProfile({ user, handleLogout }) {
   const expPercentage = Math.min(((user.exp || 0) / ((user.level || 1) * 100)) * 100, 100);
   const equippedItemDetails = ITEMS_DB.find(i => i.id === user.equipped_item);
   const EquippedIcon = equippedItemDetails ? equippedItemDetails.icon : null;
+  const isUserAdmin = checkIsAdmin(user);
 
   return (
     <div className="game-card h-full flex flex-col relative overflow-hidden">
@@ -20,9 +22,16 @@ export default function SidebarProfile({ user, handleLogout }) {
         </div>
       )}
 
+      {/* Admin Badge */}
+      {isUserAdmin && (
+        <div className="absolute top-2 right-2 flex items-center gap-1 text-[10px] font-bold text-amber-300 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/60 shadow-sm">
+          <ShieldAlert size={12} /> ADMIN
+        </div>
+      )}
+
       <div className="flex flex-col items-center gap-3 relative z-10 mb-2 mt-2">
-        <div className={`w-20 h-20 sm:w-24 sm:h-24 bg-gameSecondary rounded-full flex items-center justify-center border-4 relative transition-all duration-300 ${user.border || 'border-gamePrimary shadow-[0_0_15px_rgba(233,69,96,0.5)]'}`}>
-          <span className="font-rpg text-3xl sm:text-4xl text-gamePrimary">
+        <div className={`w-20 h-20 sm:w-24 sm:h-24 bg-gameSecondary rounded-full flex items-center justify-center border-4 relative transition-all duration-300 ${user.border || (isUserAdmin ? 'border-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.5)]' : 'border-gamePrimary shadow-[0_0_15px_rgba(233,69,96,0.5)]')}`}>
+          <span className={`font-rpg text-3xl sm:text-4xl ${isUserAdmin ? 'text-amber-400' : 'text-gamePrimary'}`}>
             {user.name ? user.name.charAt(0).toUpperCase() : 'H'}
           </span>
           {EquippedIcon && (
@@ -38,7 +47,9 @@ export default function SidebarProfile({ user, handleLogout }) {
               &lt; {user.title} &gt;
             </span>
           )}
-          <h2 className="font-bold text-xl sm:text-2xl truncate">{user.name}</h2>
+          <h2 className="font-bold text-xl sm:text-2xl truncate flex items-center justify-center gap-1.5">
+            {user.name}
+          </h2>
           {user.email && (
             <div className="flex items-center justify-center gap-1 text-[11px] text-gray-400 mt-0.5 truncate">
               <Mail size={12} className="shrink-0" />

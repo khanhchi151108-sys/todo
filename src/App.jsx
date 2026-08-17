@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { BookOpen, ShoppingBag, Backpack, History, Users } from 'lucide-react';
+import { BookOpen, ShoppingBag, Backpack, History, Users, ShieldAlert } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import SidebarProfile from './components/SidebarProfile';
 import TaskList from './components/TaskList';
@@ -10,6 +10,8 @@ import Gacha from './components/Gacha';
 import Social from './components/Social';
 import AuthModal from './components/AuthModal';
 import Toast from './components/Toast';
+import AdminDashboard from './components/AdminDashboard';
+import { checkIsAdmin } from './lib/adminAuth';
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -513,6 +515,8 @@ export default function App() {
     );
   }
 
+  const isUserAdmin = checkIsAdmin(user);
+
   return (
     <div className="h-screen bg-[#1a1a2e] text-gameText p-4 md:p-6 overflow-hidden flex flex-col relative">
       {/* Toast Notifications */}
@@ -585,6 +589,17 @@ export default function App() {
             >
               <Backpack size={16} /> Túi đồ
             </button>
+            
+            {/* Admin Tab - Exclusively for Admin users */}
+            {isUserAdmin && (
+              <button 
+                onClick={() => setActiveTab('admin')}
+                className={`px-4 py-2 rounded flex gap-2 items-center font-bold transition-all text-sm ${activeTab === 'admin' ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-black shadow-[0_0_15px_rgba(245,158,11,0.5)]' : 'text-amber-400 hover:bg-amber-950/40 border border-amber-500/40'}`}
+              >
+                <ShieldAlert size={16} /> Quản trị
+              </button>
+            )}
+
             <button 
               onClick={() => setActiveTab('history')}
               className={`px-4 py-2 rounded flex gap-2 items-center font-bold transition-all text-sm ml-auto ${activeTab === 'history' ? 'bg-gray-600 text-white shadow-lg' : 'text-gray-400 hover:bg-gameSecondary'}`}
@@ -615,6 +630,10 @@ export default function App() {
 
             {activeTab === 'inventory' && (
               <Inventory user={user} inventory={inventory} equipItem={equipItem} />
+            )}
+
+            {activeTab === 'admin' && isUserAdmin && (
+              <AdminDashboard currentUser={user} showToast={showToast} />
             )}
           </div>
         </div>
