@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Sword, Shield, Lock, Mail, User, Eye, EyeOff, Check, AlertCircle, KeyRound, ShieldAlert, Sparkles } from 'lucide-react';
+import { Sword, Shield, Lock, Mail, User, Eye, EyeOff, Check, AlertCircle, KeyRound, ShieldAlert } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 export default function AuthModal({ onAuthSuccess, showToast }) {
@@ -39,9 +39,8 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
     setLoading(true);
 
     try {
-      // Master PIN for Server Owner (default: 151108)
       if (adminPin.trim() !== '151108' && adminPin.trim() !== 'admin' && adminPin.trim() !== 'Admin@123456') {
-        throw new Error('Mã PIN Admin Master không chính xác! (Mặc định: 151108)');
+        throw new Error('Mã PIN không chính xác.');
       }
 
       // Fetch or ensure KhanhChi admin profile exists
@@ -74,16 +73,16 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
 
       showToast({
         type: 'level-up',
-        title: 'Quyền Trượng Admin Kích Hoạt!',
-        message: 'Chào mừng Chủ Server KhanhChi đã truy cập hệ thống Quản Trị Tối Cao!'
+        title: 'Xác thực thành công',
+        message: 'Chào mừng Admin KhanhChi!'
       });
 
       if (onAuthSuccess) {
         onAuthSuccess(adminUser);
       }
     } catch (err) {
-      console.error('Admin master login error:', err);
-      setErrorMsg(err.message || 'Xác thực Admin thất bại.');
+      console.error('Admin login error:', err);
+      setErrorMsg(err.message || 'Mã PIN không đúng.');
     } finally {
       setLoading(false);
     }
@@ -107,14 +106,14 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
         showToast({
           type: 'success',
           title: 'Đăng nhập thành công',
-          message: 'Chào mừng anh hùng trở lại thế giới Quest Log!'
+          message: 'Chào mừng trở lại!'
         });
         
         if (onAuthSuccess) onAuthSuccess(data.user);
       } else if (authMode === 'register') {
         // Validation for Sign Up
         if (username.trim().length < 3) {
-          throw new Error('Tên anh hùng phải có ít nhất 3 ký tự.');
+          throw new Error('Tên nhân vật phải có ít nhất 3 ký tự.');
         }
         if (password.length < 6) {
           throw new Error('Mật khẩu phải có ít nhất 6 ký tự.');
@@ -159,7 +158,7 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
         showToast({
           type: 'success',
           title: 'Đăng ký thành công',
-          message: 'Tài khoản đã sẵn sàng! Chào mừng Tân Binh gia nhập đấu trường.'
+          message: 'Tài khoản đã sẵn sàng!'
         });
 
         if (onAuthSuccess) onAuthSuccess(data.user);
@@ -168,9 +167,9 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
       console.error('Auth error:', err);
       let message = err.message || 'Có lỗi xảy ra trong quá trình xác thực.';
       if (message.includes('Invalid login credentials')) {
-        message = 'Email hoặc mật khẩu không chính xác. Vui lòng kiểm tra lại.';
+        message = 'Email hoặc mật khẩu không chính xác.';
       } else if (message.includes('User already registered')) {
-        message = 'Email này đã được đăng ký. Hãy chuyển sang tab Đăng nhập.';
+        message = 'Email này đã được đăng ký.';
       }
       setErrorMsg(message);
     } finally {
@@ -182,25 +181,22 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#1a1a2e]">
-      {/* Background glow animations */}
+      {/* Background glow */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
-        <div className="absolute top-[15%] left-[10%] w-72 h-72 bg-gamePrimary rounded-full mix-blend-screen filter blur-3xl opacity-25 animate-pulse"></div>
-        <div className="absolute top-[45%] right-[10%] w-80 h-80 bg-gameEasy rounded-full mix-blend-screen filter blur-3xl opacity-20 animate-pulse" style={{ animationDelay: '2s' }}></div>
+        <div className="absolute top-[15%] left-[10%] w-72 h-72 bg-gamePrimary rounded-full mix-blend-screen filter blur-3xl opacity-20 animate-pulse"></div>
+        <div className="absolute top-[45%] right-[10%] w-80 h-80 bg-gameEasy rounded-full mix-blend-screen filter blur-3xl opacity-15 animate-pulse" style={{ animationDelay: '2s' }}></div>
       </div>
 
       <div className="game-card w-full max-w-md animate-fade-in-up border-gameSecondary/80 backdrop-blur-md shadow-2xl p-6 sm:p-8">
         
         {/* Header */}
-        <div className="text-center mb-5">
+        <div className="text-center mb-6">
           <div className="inline-block p-3 rounded-2xl bg-gameSecondary/50 border border-gamePrimary/40 mb-3 shadow-[0_0_20px_rgba(233,69,96,0.3)]">
-            <Sword className="w-10 h-10 text-gamePrimary animate-bounce" />
+            <Sword className="w-9 h-9 text-gamePrimary animate-bounce" />
           </div>
-          <h1 className="text-3xl font-rpg text-transparent bg-clip-text bg-gradient-to-r from-gamePrimary via-pink-400 to-gameEasy">
+          <h1 className="text-2xl sm:text-3xl font-rpg text-transparent bg-clip-text bg-gradient-to-r from-gamePrimary via-pink-400 to-gameEasy">
             Quest Log RPG
           </h1>
-          <p className="text-gameText/70 text-xs mt-1 font-medium">
-            Cổng Đăng Nhập Server Hiệp Sĩ &bull; Mã Hóa Đầu Cuối
-          </p>
         </div>
 
         {/* Mode switch tabs */}
@@ -248,19 +244,12 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
           </div>
         )}
 
-        {/* ADMIN MASTER LOGIN FORM */}
+        {/* ADMIN LOGIN FORM */}
         {authMode === 'admin' ? (
           <form onSubmit={handleAdminMasterLogin} className="space-y-4 animate-fade-in">
-            <div className="p-3.5 rounded-lg bg-amber-950/30 border border-amber-500/40 text-xs text-amber-200">
-              <div className="flex items-center gap-1.5 font-bold text-amber-400 mb-1">
-                <Sparkles size={14} /> Chế độ Đăng Nhập Quản Trị Viên:
-              </div>
-              Nhập mã Master PIN để vào thẳng tài khoản <strong className="text-white">KhanhChi</strong> với đầy đủ quyền Admin.
-            </div>
-
             <div>
               <label className="block mb-1.5 text-xs font-semibold text-amber-300">
-                Mã PIN Admin Master
+                Mã PIN Admin
               </label>
               <div className="relative">
                 <KeyRound size={16} className="absolute left-3 top-3 text-amber-400" />
@@ -269,7 +258,8 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
                   value={adminPin}
                   onChange={(e) => setAdminPin(e.target.value)}
                   className="input-field pl-9 pr-9 text-sm border-amber-500/50 focus:border-amber-400"
-                  placeholder="Nhập mã PIN (Mặc định: 151108)"
+                  placeholder="••••••••"
+                  autoFocus
                   required
                 />
                 <button
@@ -288,23 +278,23 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
               className="w-full flex justify-center items-center gap-2 py-3 rounded-lg font-bold text-sm bg-gradient-to-r from-amber-500 to-yellow-500 text-black hover:from-amber-400 hover:to-yellow-400 shadow-lg shadow-amber-500/30 transition-all mt-2"
             >
               {loading ? (
-                <span className="animate-pulse">Đang xác thực Master Key...</span>
+                <span className="animate-pulse">Đang xác thực...</span>
               ) : (
                 <>
-                  <ShieldAlert size={18} /> Mở Khóa Quyền Admin
+                  <ShieldAlert size={16} /> Xác nhận Admin
                 </>
               )}
             </button>
           </form>
         ) : (
-          /* STANDARD USER LOGIN / REGISTER FORM */
+          /* USER LOGIN / REGISTER FORM */
           <form onSubmit={handleAuth} className="space-y-4 animate-fade-in">
             
             {/* Username (Register only) */}
             {authMode === 'register' && (
               <div>
                 <label className="block mb-1.5 text-xs font-semibold text-gameText/90">
-                  Tên anh hùng (Username)
+                  Tên nhân vật
                 </label>
                 <div className="relative">
                   <User size={16} className="absolute left-3 top-3 text-gray-400" />
@@ -313,7 +303,7 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     className="input-field pl-9 text-sm"
-                    placeholder="Ví dụ: DragonSlayer99"
+                    placeholder="Nhập tên nhân vật..."
                     required={authMode === 'register'}
                   />
                 </div>
@@ -323,7 +313,7 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
             {/* Email */}
             <div>
               <label className="block mb-1.5 text-xs font-semibold text-gameText/90">
-                Địa chỉ Email
+                Email
               </label>
               <div className="relative">
                 <Mail size={16} className="absolute left-3 top-3 text-gray-400" />
@@ -332,7 +322,7 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="input-field pl-9 text-sm"
-                  placeholder="hero@example.com"
+                  placeholder="name@example.com"
                   required
                 />
               </div>
@@ -380,7 +370,7 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
             {authMode === 'register' && (
               <div>
                 <label className="block mb-1.5 text-xs font-semibold text-gameText/90">
-                  Xác nhận Mật khẩu
+                  Xác nhận mật khẩu
                 </label>
                 <div className="relative">
                   <Lock size={16} className="absolute left-3 top-3 text-gray-400" />
@@ -407,14 +397,14 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
               } ${loading ? 'opacity-70 cursor-wait' : ''}`}
             >
               {loading ? (
-                <span className="animate-pulse">Đang kết nối Server...</span>
+                <span className="animate-pulse">Đang xử lý...</span>
               ) : authMode === 'login' ? (
                 <>
-                  <KeyRound size={18} /> Vào Thế Giới RPG
+                  <KeyRound size={16} /> Đăng nhập
                 </>
               ) : (
                 <>
-                  <Check size={18} /> Tạo Nhân Vật & Bắt Đầu
+                  <Check size={16} /> Đăng ký
                 </>
               )}
             </button>
@@ -424,7 +414,7 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
         {/* Security badge footer */}
         <div className="mt-6 pt-4 border-t border-gameSecondary/50 flex items-center justify-center gap-2 text-[11px] text-gray-400">
           <Shield size={14} className="text-green-400 shrink-0" />
-          <span>Bảo mật chuẩn TLS 1.3 &bull; Mật khẩu băm an toàn 100%</span>
+          <span>Bảo mật TLS 1.3 &bull; Dữ liệu được mã hóa</span>
         </div>
 
       </div>
