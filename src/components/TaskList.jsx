@@ -182,7 +182,7 @@ export default function TaskList({ tasks, addTask, toggleTask, deleteTask, activ
             };
             
             const cardClass = activeTab === 'tasks' 
-              ? `game-card flex flex-col sm:flex-row sm:items-center gap-3 transition-transform hover:-translate-y-1 ${urgencyColor[task.urgency]} ${task.isOverdue ? 'bg-red-950/20' : ''}`
+              ? `game-card group flex flex-col sm:flex-row sm:items-center gap-3 transition-transform hover:-translate-y-1 ${urgencyColor[task.urgency]} ${task.isOverdue ? 'bg-red-950/20' : ''}`
               : `game-card flex items-center opacity-60 grayscale gap-3`;
 
             return (

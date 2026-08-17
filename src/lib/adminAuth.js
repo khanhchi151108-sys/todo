@@ -15,6 +15,6 @@ export function checkIsAdmin(user) {
   const username = (user.name || user.username || '').toLowerCase().trim();
   const email = (user.email || '').toLowerCase().trim();
   return ADMIN_IDENTIFIERS.some(id => 
-    username === id || username.includes(id) || email.includes(id)
+    username === id || email.split('@')[0] === id
   );
 }

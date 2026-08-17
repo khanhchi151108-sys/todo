@@ -12,6 +12,7 @@ import AuthModal from './components/AuthModal';
 import Toast from './components/Toast';
 import AdminDashboard from './components/AdminDashboard';
 import { checkIsAdmin } from './lib/adminAuth';
+import { sanitizeText } from './lib/crypto';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -233,17 +234,14 @@ export default function App() {
   useEffect(() => {
     let isMounted = true;
 
-    // Check localStorage first for instant login persistence
+    // H3 fix: localStorage only restores UI instantly (no fetchData to avoid double-fetch)
     const savedLocalUser = localStorage.getItem('rpg_user');
     if (savedLocalUser) {
       try {
         const parsed = JSON.parse(savedLocalUser);
         if (parsed?.name) {
           setUser(parsed);
-          fetchData(parsed);
-          if (checkIsAdmin(parsed)) {
-            setActiveTab('admin');
-          }
+          // H5 fix: Don't auto-switch to admin tab on F5
         }
       } catch (e) {
         console.error('Local user parse error:', e);
@@ -257,6 +255,14 @@ export default function App() {
         if (profile) {
           await fetchData(profile);
         }
+      } else if (savedLocalUser) {
+        // No Supabase session but has localStorage (Admin PIN login) — fetch data
+        try {
+          const parsed = JSON.parse(savedLocalUser);
+          if (parsed?.name) {
+            await fetchData(parsed);
+          }
+        } catch { /* already handled above */ }
       }
       setLoading(false);
     });
@@ -329,19 +335,24 @@ export default function App() {
     return { newExp: exp, newLevel: level, leveledUp };
   };
 
-  // World Boss attack
+  // World Boss attack — H4 fix: use RPC for atomic operation
   const dealBossDamage = async () => {
     try {
-      const { data: boss } = await supabase.from('world_boss').select('*').limit(1).maybeSingle();
-      if (boss && boss.hp > 0) {
-        const newHp = Math.max(0, boss.hp - 10);
-        await supabase.from('world_boss').update({ hp: newHp }).eq('id', boss.id);
-        if (newHp === 0 && boss.hp > 0) {
-          showToast({
-            type: 'level-up',
-            title: 'CHIẾN THẮNG HUY HOÀNG!',
-            message: 'Boss Thế Giới đã bị tiêu diệt!'
-          });
+      // Try RPC first (atomic, race-condition safe)
+      const { error: rpcErr } = await supabase.rpc('attack_world_boss', { damage_amount: 10 });
+      if (rpcErr) {
+        // Fallback to manual update if RPC doesn't exist
+        const { data: boss } = await supabase.from('world_boss').select('*').limit(1).maybeSingle();
+        if (boss && boss.hp > 0) {
+          const newHp = Math.max(0, boss.hp - 10);
+          await supabase.from('world_boss').update({ hp: newHp }).eq('id', boss.id);
+          if (newHp === 0) {
+            showToast({
+              type: 'level-up',
+              title: 'CHIẾN THẮNG!',
+              message: 'Boss Thế Giới đã bị tiêu diệt!'
+            });
+          }
         }
       }
     } catch (err) {
@@ -353,11 +364,14 @@ export default function App() {
     if (!user) return;
 
     try {
+      const cleanText = sanitizeText(taskData.text?.trim());
+      if (!cleanText) return;
+
       if (taskData.id) {
         const { data, error } = await supabase
           .from('tasks')
           .update({
-            text: taskData.text,
+            text: cleanText,
             difficulty: taskData.difficulty,
             tag: taskData.tag,
             deadline: taskData.deadline ? new Date(taskData.deadline).toISOString() : null
@@ -376,7 +390,7 @@ export default function App() {
           .from('tasks')
           .insert([{
             user_id: user.name,
-            text: taskData.text,
+            text: cleanText,
             difficulty: taskData.difficulty,
             tag: taskData.tag,
             deadline: taskData.deadline ? new Date(taskData.deadline).toISOString() : null,
@@ -420,7 +434,24 @@ export default function App() {
           const rawExp = (user.exp || 0) + reward.exp;
           const { newExp, newLevel, leveledUp } = calculateLevelUp(rawExp, user.level || 1);
           const newGold = (user.gold || 0) + reward.gold;
-          const newStreak = (user.streak || 0) + 1;
+
+          // M1 fix: Calculate streak by daily active completion
+          const todayKey = new Date().toISOString().split('T')[0];
+          const lastStreakDate = localStorage.getItem(`rpg_streak_date_${user.name}`);
+          let newStreak = user.streak || 0;
+
+          if (lastStreakDate !== todayKey) {
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayKey = yesterday.toISOString().split('T')[0];
+
+            if (lastStreakDate === yesterdayKey || !lastStreakDate || newStreak === 0) {
+              newStreak += 1;
+            } else {
+              newStreak = 1;
+            }
+            localStorage.setItem(`rpg_streak_date_${user.name}`, todayKey);
+          }
 
           const updates = { exp: newExp, gold: newGold, level: newLevel, streak: newStreak };
           if (user.double_xp) {
@@ -461,6 +492,12 @@ export default function App() {
   const buyItem = async (item) => {
     if (!user || user.gold < item.price) {
       showToast({ type: 'warning', message: 'Không đủ vàng!' });
+      return;
+    }
+
+    // M3 fix: Prevent duplicate purchase of non-consumable items
+    if (!item.consumable && inventory.includes(item.id)) {
+      showToast({ type: 'warning', message: `Bạn đã sở hữu ${item.name} rồi!` });
       return;
     }
 
@@ -529,6 +566,9 @@ export default function App() {
             const finalUser = profile || authUser;
             setUser(finalUser);
             localStorage.setItem('rpg_user', JSON.stringify(finalUser));
+            // C1 fix: ensure loading state is cleared for Admin PIN login
+            setLoading(false);
+            // H5: only set admin tab on explicit first login
             if (checkIsAdmin(finalUser)) {
               setActiveTab('admin');
             }

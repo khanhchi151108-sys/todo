@@ -4,6 +4,33 @@ import confetti from 'canvas-confetti';
 import { GACHA_POOL } from '../data/items';
 import { supabase } from '../lib/supabase';
 
+// M2 fix: Weighted rarity system — rarer items have lower drop rates
+const RARITY_WEIGHTS = {
+  common: 40,     // 40%
+  uncommon: 30,   // 30%
+  rare: 18,       // 18%
+  epic: 9,        // 9%
+  legendary: 3    // 3%
+};
+
+function weightedRandom(pool) {
+  const totalWeight = pool.reduce((sum, item) => sum + (RARITY_WEIGHTS[item.rarity] || 10), 0);
+  let roll = Math.random() * totalWeight;
+  for (const item of pool) {
+    roll -= (RARITY_WEIGHTS[item.rarity] || 10);
+    if (roll <= 0) return item;
+  }
+  return pool[pool.length - 1];
+}
+
+const RARITY_COLORS = {
+  common: 'text-gray-300',
+  uncommon: 'text-green-400',
+  rare: 'text-blue-400',
+  epic: 'text-purple-400',
+  legendary: 'text-yellow-400 animate-pulse'
+};
+
 export default function Gacha({ user, onClose, onReward }) {
   const [isSpinning, setIsSpinning] = useState(false);
   const [reward, setReward] = useState(null);
@@ -11,16 +38,13 @@ export default function Gacha({ user, onClose, onReward }) {
   const drawGacha = async () => {
     setIsSpinning(true);
     
-    // Simulate spinning animation
     setTimeout(async () => {
-      // Randomly pick a reward type
       const isTitle = Math.random() > 0.5;
       const pool = isTitle ? GACHA_POOL.titles : GACHA_POOL.borders;
       
-      const randomIndex = Math.floor(Math.random() * pool.length);
-      const wonItem = { ...pool[randomIndex], type: isTitle ? 'title' : 'border' };
+      // M2: Use weighted random instead of uniform random
+      const wonItem = { ...weightedRandom(pool), type: isTitle ? 'title' : 'border' };
 
-      // Save to DB by user.name
       const updateData = isTitle ? { title: wonItem.name } : { border: wonItem.class };
       const { data, error } = await supabase
         .from('profiles')
@@ -36,10 +60,13 @@ export default function Gacha({ user, onClose, onReward }) {
       setIsSpinning(false);
       setReward(wonItem);
       
+      const confettiCount = wonItem.rarity === 'legendary' ? 300 : wonItem.rarity === 'epic' ? 200 : 100;
       confetti({
-        particleCount: 150,
+        particleCount: confettiCount,
         spread: 100,
-        colors: ['#ff00ff', '#00ffff', '#ffff00']
+        colors: wonItem.rarity === 'legendary' 
+          ? ['#ffd700', '#ffaa00', '#ff6600'] 
+          : ['#ff00ff', '#00ffff', '#ffff00']
       });
 
       if (data && onReward) {
@@ -48,6 +75,14 @@ export default function Gacha({ user, onClose, onReward }) {
         onReward(updateData);
       }
     }, 2000);
+  };
+
+  const rarityLabel = {
+    common: 'Phổ thông',
+    uncommon: 'Không phổ biến',
+    rare: 'Hiếm',
+    epic: 'Sử thi',
+    legendary: 'Huyền thoại'
   };
 
   return (
@@ -63,9 +98,12 @@ export default function Gacha({ user, onClose, onReward }) {
           <div className="animate-fade-in-up py-8">
             <Sparkles size={64} className="mx-auto text-yellow-400 mb-4 animate-spin-slow" />
             <h2 className="text-2xl font-rpg text-yellow-400 mb-2">Chúc mừng!</h2>
-            <p className="mb-4 text-sm">Bạn đã nhận được {reward.type === 'title' ? 'Danh hiệu' : 'Viền Avatar'}:</p>
+            <p className="mb-1 text-sm">Bạn đã nhận được {reward.type === 'title' ? 'Danh hiệu' : 'Viền Avatar'}:</p>
+            <p className={`text-xs mb-3 font-bold ${RARITY_COLORS[reward.rarity] || 'text-gray-400'}`}>
+              ★ {rarityLabel[reward.rarity] || reward.rarity}
+            </p>
             <div className={`inline-block p-4 rounded-lg bg-gray-900 border-2 border-gamePrimary mb-6 ${reward.type === 'border' ? reward.class : ''}`}>
-              <span className={`font-bold text-lg ${reward.rarity === 'legendary' ? 'text-yellow-400 animate-pulse' : 'text-gamePrimary'}`}>
+              <span className={`font-bold text-lg ${RARITY_COLORS[reward.rarity] || 'text-gamePrimary'}`}>
                 {reward.name || 'Viền Hiếm'}
               </span>
             </div>

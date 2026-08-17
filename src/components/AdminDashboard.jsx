@@ -17,7 +17,14 @@ export default function AdminDashboard({ currentUser, showToast }) {
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [editFormData, setEditFormData] = useState({});
   const [bossFormData, setBossFormData] = useState({ name: '', hp: 5000, max_hp: 5000 });
-  const [adminLogs, setAdminLogs] = useState([]);
+  const [adminLogs, setAdminLogs] = useState(() => {
+    try {
+      const saved = localStorage.getItem('rpg_admin_logs');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Fetch all players and boss
   const fetchAdminData = useCallback(async () => {
@@ -60,7 +67,7 @@ export default function AdminDashboard({ currentUser, showToast }) {
     fetchAdminData();
   }, [fetchAdminData]);
 
-  // Log an admin action
+  // Log an admin action (M4 fix: persist to localStorage)
   const addLog = (action, details) => {
     const newLog = {
       id: Date.now(),
@@ -69,7 +76,15 @@ export default function AdminDashboard({ currentUser, showToast }) {
       details,
       admin: currentUser.name
     };
-    setAdminLogs(prev => [newLog, ...prev.slice(0, 20)]);
+    setAdminLogs(prev => {
+      const updated = [newLog, ...prev.slice(0, 49)];
+      try {
+        localStorage.setItem('rpg_admin_logs', JSON.stringify(updated));
+      } catch (e) {
+        console.warn('Failed to persist admin log:', e);
+      }
+      return updated;
+    });
   };
 
   // Open player edit modal
