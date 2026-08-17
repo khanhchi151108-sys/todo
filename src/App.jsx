@@ -14,7 +14,6 @@ import AdminDashboard from './components/AdminDashboard';
 import { checkIsAdmin } from './lib/adminAuth';
 
 export default function App() {
-  const [session, setSession] = useState(null);
   const [user, setUser] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [inventory, setInventory] = useState([]);
@@ -36,7 +35,7 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  // Update user profile in Supabase (compatible with live database)
+  // Update user profile in Supabase
   const updateUserProfile = useCallback(async (updates, targetUsername) => {
     const username = targetUsername || user?.name;
     if (!username) return;
@@ -50,7 +49,11 @@ export default function App() {
 
       if (error) throw error;
       if (updatedProfile) {
-        setUser(prev => ({ ...prev, ...updatedProfile }));
+        setUser(prev => {
+          const next = { ...prev, ...updatedProfile };
+          localStorage.setItem('rpg_user', JSON.stringify(next));
+          return next;
+        });
       }
     } catch (err) {
       console.error('Update profile error:', err);
@@ -159,7 +162,7 @@ export default function App() {
   // Fetch or create profile based on Supabase Auth session
   const syncProfile = useCallback(async (authUser) => {
     try {
-      const username = authUser.user_metadata?.username || authUser.email?.split('@')[0] || 'Anh Hùng';
+      const username = authUser.user_metadata?.username || authUser.name || authUser.email?.split('@')[0] || 'Anh Hùng';
       
       const { data, error } = await supabase
         .from('profiles')
@@ -173,12 +176,13 @@ export default function App() {
 
       if (data) {
         const fullUser = {
-          id: authUser.id,
+          id: authUser.id || 'auth-user',
           name: data.username,
           email: authUser.email,
           ...data
         };
         setUser(fullUser);
+        localStorage.setItem('rpg_user', JSON.stringify(fullUser));
         return fullUser;
       }
 
@@ -204,7 +208,7 @@ export default function App() {
       }
 
       const createdUser = {
-        id: authUser.id,
+        id: authUser.id || 'auth-user',
         name: newProfile?.username || username,
         email: authUser.email,
         level: 1,
@@ -217,6 +221,7 @@ export default function App() {
         ...(newProfile || {})
       };
       setUser(createdUser);
+      localStorage.setItem('rpg_user', JSON.stringify(createdUser));
       return createdUser;
     } catch (err) {
       console.error('Profile sync exception:', err);
@@ -228,9 +233,25 @@ export default function App() {
   useEffect(() => {
     let isMounted = true;
 
+    // Check localStorage first for instant login persistence
+    const savedLocalUser = localStorage.getItem('rpg_user');
+    if (savedLocalUser) {
+      try {
+        const parsed = JSON.parse(savedLocalUser);
+        if (parsed?.name) {
+          setUser(parsed);
+          fetchData(parsed);
+          if (checkIsAdmin(parsed)) {
+            setActiveTab('admin');
+          }
+        }
+      } catch (e) {
+        console.error('Local user parse error:', e);
+      }
+    }
+
     supabase.auth.getSession().then(async ({ data: { session: currentSession } }) => {
       if (!isMounted) return;
-      setSession(currentSession);
       if (currentSession?.user) {
         const profile = await syncProfile(currentSession.user);
         if (profile) {
@@ -242,13 +263,12 @@ export default function App() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
       if (!isMounted) return;
-      setSession(newSession);
       if (newSession?.user) {
         const profile = await syncProfile(newSession.user);
         if (profile) {
           await fetchData(profile);
         }
-      } else {
+      } else if (!localStorage.getItem('rpg_user')) {
         setUser(null);
         setTasks([]);
         setInventory([]);
@@ -265,18 +285,19 @@ export default function App() {
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut();
-      setUser(null);
-      setSession(null);
-      setTasks([]);
-      setInventory([]);
-      showToast({
-        type: 'info',
-        title: 'Đã Đăng Xuất',
-        message: 'Hẹn gặp lại anh hùng trong những chuyến phiêu lưu tiếp theo!'
-      });
     } catch (err) {
       console.error('Logout error:', err);
     }
+    localStorage.removeItem('rpg_user');
+    setUser(null);
+    setTasks([]);
+    setInventory([]);
+    setActiveTab('tasks');
+    showToast({
+      type: 'info',
+      title: 'Đã Đăng Xuất',
+      message: 'Hẹn gặp lại!'
+    });
   };
 
   const calculateReward = (diff, isDoubleXp) => {
@@ -319,7 +340,7 @@ export default function App() {
           showToast({
             type: 'level-up',
             title: 'CHIẾN THẮNG HUY HOÀNG!',
-            message: 'Boss Thế Giới đã bị tiêu diệt! Toàn server nhận thưởng vinh quang!'
+            message: 'Boss Thế Giới đã bị tiêu diệt!'
           });
         }
       }
@@ -372,7 +393,7 @@ export default function App() {
       }
     } catch (err) {
       console.error('Task save error:', err);
-      showToast({ type: 'error', title: 'Lỗi', message: 'Không thể lưu nhiệm vụ. Vui lòng thử lại.' });
+      showToast({ type: 'error', title: 'Lỗi', message: 'Không thể lưu nhiệm vụ.' });
     }
   };
 
@@ -411,7 +432,7 @@ export default function App() {
           showToast({
             type: leveledUp ? 'level-up' : 'success',
             title: leveledUp ? `🎉 LÊN CẤP ${newLevel}!` : 'Nhiệm Vụ Hoàn Thành!',
-            message: `+${reward.exp} EXP | +${reward.gold} 🪙 Gold${user.double_xp ? ' (X2 EXP kích hoạt!)' : ''}`
+            message: `+${reward.exp} EXP | +${reward.gold} 🪙 Gold${user.double_xp ? ' (X2 EXP)' : ''}`
           });
 
           // Attack World Boss
@@ -429,7 +450,7 @@ export default function App() {
       const { error } = await supabase.from('tasks').delete().eq('id', id);
       if (error) throw error;
       setTasks(prev => prev.filter(t => t.id !== id));
-      showToast({ type: 'info', message: 'Đã hủy nhiệm vụ.' });
+      showToast({ type: 'info', message: 'Đã xóa nhiệm vụ.' });
     } catch (err) {
       console.error('Delete task error:', err);
       showToast({ type: 'error', message: 'Không thể xóa nhiệm vụ.' });
@@ -439,7 +460,7 @@ export default function App() {
   // Buy item with batched atomic updates
   const buyItem = async (item) => {
     if (!user || user.gold < item.price) {
-      showToast({ type: 'warning', message: 'Bạn không đủ vàng để mua vật phẩm này!' });
+      showToast({ type: 'warning', message: 'Không đủ vàng!' });
       return;
     }
 
@@ -450,11 +471,11 @@ export default function App() {
         if (item.id === 'health_potion') {
           const newHp = Math.min(100, (user.hp || 100) + 20);
           await updateUserProfile({ gold: newGold, hp: newHp });
-          showToast({ type: 'success', title: 'Hồi Máu', message: `Đã dùng ${item.name} và hồi 20 HP!` });
+          showToast({ type: 'success', title: 'Hồi Máu', message: `Đã dùng ${item.name} (+20 HP)` });
         } else if (item.id === 'streak_freeze') {
           const newFrozen = (user.frozen_days || 0) + 1;
           await updateUserProfile({ gold: newGold, frozen_days: newFrozen });
-          showToast({ type: 'success', title: 'Đóng Băng', message: 'Kích hoạt Bình Đóng Băng! Chuỗi ngày được bảo vệ thêm 1 ngày.' });
+          showToast({ type: 'success', title: 'Đóng Băng', message: 'Kích hoạt Bình Đóng Băng (+1 ngày)' });
         } else if (item.id === 'focus_potion') {
           await updateUserProfile({ gold: newGold });
           setShowPomodoro(true);
@@ -473,12 +494,12 @@ export default function App() {
         if (data) {
           await updateUserProfile({ gold: newGold });
           setInventory(prev => [...prev, item.id]);
-          showToast({ type: 'success', title: 'Mua Thành Công', message: `Đã trang bị ${item.name} vào Túi Đồ!` });
+          showToast({ type: 'success', title: 'Mua Thành Công', message: `Đã nhận ${item.name}!` });
         }
       }
     } catch (err) {
       console.error('Buy item error:', err);
-      showToast({ type: 'error', message: 'Giao dịch thất bại. Vui lòng thử lại.' });
+      showToast({ type: 'error', message: 'Giao dịch thất bại.' });
     }
   };
 
@@ -488,26 +509,30 @@ export default function App() {
     showToast({ type: 'info', message: `Đã trang bị ${item.name}!` });
   };
 
-  if (loading) {
+  if (loading && !user) {
     return (
       <div className="min-h-screen bg-[#1a1a2e] flex flex-col items-center justify-center text-gameText">
         <div className="w-12 h-12 border-4 border-gamePrimary border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="font-rpg text-sm text-gamePrimary animate-pulse">Đang tải thế giới RPG...</p>
+        <p className="font-rpg text-sm text-gamePrimary animate-pulse">Đang tải...</p>
       </div>
     );
   }
 
   // Not authenticated -> Show Auth Modal
-  if (!session || !user) {
+  if (!user) {
     return (
       <>
         <Toast toasts={toasts} removeToast={removeToast} />
         <AuthModal 
           onAuthSuccess={async (authUser) => {
             const profile = await syncProfile(authUser);
-            if (profile) {
-              await fetchData(profile);
+            const finalUser = profile || authUser;
+            setUser(finalUser);
+            localStorage.setItem('rpg_user', JSON.stringify(finalUser));
+            if (checkIsAdmin(finalUser)) {
+              setActiveTab('admin');
             }
+            await fetchData(finalUser);
           }} 
           showToast={showToast} 
         />
@@ -533,7 +558,7 @@ export default function App() {
             showToast({
               type: 'success',
               title: 'Hoàn Thành Tập Trung!',
-              message: 'Thuốc phát huy tác dụng: Nhận X2 XP cho nhiệm vụ tiếp theo!'
+              message: 'Nhận X2 XP cho nhiệm vụ tiếp theo!'
             });
           }} 
         />
