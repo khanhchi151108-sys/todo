@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Check, Plus, Trash2, Edit2, Sword, BookOpen, Dumbbell, Briefcase, Clock, AlertTriangle } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
-export default function TaskList({ tasks, addTask, toggleTask, deleteTask, editTask, activeTab }) {
+export default function TaskList({ tasks, addTask, toggleTask, deleteTask, activeTab }) {
   const [newTask, setNewTask] = useState('');
   const [difficulty, setDifficulty] = useState('Vừa');
   const [tag, setTag] = useState('Học tập');
@@ -15,7 +15,7 @@ export default function TaskList({ tasks, addTask, toggleTask, deleteTask, editT
     
     addTask({
       id: editingTask?.id,
-      text: newTask,
+      text: newTask.trim(),
       difficulty,
       tag,
       deadline,
@@ -30,15 +30,21 @@ export default function TaskList({ tasks, addTask, toggleTask, deleteTask, editT
   const startEdit = (task) => {
     setEditingTask(task);
     setNewTask(task.text);
-    setDifficulty(task.difficulty);
-    setTag(task.tag);
+    setDifficulty(task.difficulty || 'Vừa');
+    setTag(task.tag || 'Học tập');
     if (task.deadline) {
       const d = new Date(task.deadline);
-      const localFormat = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().slice(0,16);
+      const localFormat = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
       setDeadline(localFormat);
     } else {
       setDeadline('');
     }
+  };
+
+  const cancelEdit = () => {
+    setEditingTask(null);
+    setNewTask('');
+    setDeadline('');
   };
 
   const handleToggle = (task) => {
@@ -77,40 +83,39 @@ export default function TaskList({ tasks, addTask, toggleTask, deleteTask, editT
     return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')} ${d.getDate()}/${d.getMonth()+1}`;
   };
 
-  // Sort and Categorize Tasks
-  const now = new Date();
-  
-  const activeTasks = tasks.filter(t => t.status !== 'history' && !t.completed);
-  const historyTasks = tasks.filter(t => t.status === 'history' || t.completed);
-
-  // Categorize active tasks
-  const categorizedTasks = activeTasks.map(task => {
-    let urgency = 'green'; // > 48h or none
-    let isOverdue = false;
+  // Memoized task categorization and sorting for optimal rendering performance
+  const displayTasks = useMemo(() => {
+    const now = new Date();
     
-    if (task.deadline) {
-      const taskDate = new Date(task.deadline);
-      const diffHours = (taskDate - now) / (1000 * 60 * 60);
-      
-      if (diffHours < 0) {
-        urgency = 'red';
-        isOverdue = true;
-      } else if (diffHours <= 24) {
-        urgency = 'red';
-      } else if (diffHours <= 48) {
-        urgency = 'orange';
-      }
+    if (activeTab === 'history') {
+      return tasks.filter(t => t.status === 'history' || t.completed);
     }
-    return { ...task, urgency, isOverdue };
-  });
 
-  // Sort: Red first, then Orange, then Green
-  const sortedActiveTasks = categorizedTasks.sort((a, b) => {
+    const activeTasks = tasks.filter(t => t.status !== 'history' && !t.completed);
+
+    const categorized = activeTasks.map(task => {
+      let urgency = 'green';
+      let isOverdue = false;
+      
+      if (task.deadline) {
+        const taskDate = new Date(task.deadline);
+        const diffHours = (taskDate - now) / (1000 * 60 * 60);
+        
+        if (diffHours < 0) {
+          urgency = 'red';
+          isOverdue = true;
+        } else if (diffHours <= 24) {
+          urgency = 'red';
+        } else if (diffHours <= 48) {
+          urgency = 'orange';
+        }
+      }
+      return { ...task, urgency, isOverdue };
+    });
+
     const rank = { red: 1, orange: 2, green: 3 };
-    return rank[a.urgency] - rank[b.urgency];
-  });
-
-  const displayTasks = activeTab === 'tasks' ? sortedActiveTasks : historyTasks;
+    return categorized.sort((a, b) => rank[a.urgency] - rank[b.urgency]);
+  }, [tasks, activeTab]);
 
   return (
     <div className="flex flex-col h-full">
@@ -132,7 +137,7 @@ export default function TaskList({ tasks, addTask, toggleTask, deleteTask, editT
                 className="input-field w-auto"
               />
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="input-field w-auto cursor-pointer">
                 <option value="Dễ">Dễ</option>
                 <option value="Vừa">Vừa</option>
@@ -143,6 +148,15 @@ export default function TaskList({ tasks, addTask, toggleTask, deleteTask, editT
                 <option value="Sức khỏe">Sức khỏe</option>
                 <option value="Công việc">Công việc</option>
               </select>
+              {editingTask && (
+                <button 
+                  type="button" 
+                  onClick={cancelEdit} 
+                  className="text-xs px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-gray-300 ml-auto"
+                >
+                  Hủy chỉnh sửa
+                </button>
+              )}
             </div>
             <button type="submit" className="btn-primary w-full flex justify-center items-center gap-2">
               {editingTask ? <Edit2 size={18} /> : <Plus size={18} />}
@@ -212,10 +226,10 @@ export default function TaskList({ tasks, addTask, toggleTask, deleteTask, editT
                 
                 {activeTab === 'tasks' && (
                   <div className="flex gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity mt-2 sm:mt-0">
-                    <button onClick={() => startEdit(task)} className="p-1.5 text-gameEasy hover:bg-gameSecondary rounded">
+                    <button onClick={() => startEdit(task)} className="p-1.5 text-gameEasy hover:bg-gameSecondary rounded" title="Chỉnh sửa">
                       <Edit2 size={16} />
                     </button>
-                    <button onClick={() => deleteTask(task.id)} className="p-1.5 text-gamePrimary hover:bg-gameSecondary rounded">
+                    <button onClick={() => deleteTask(task.id)} className="p-1.5 text-gamePrimary hover:bg-gameSecondary rounded" title="Xóa">
                       <Trash2 size={16} />
                     </button>
                   </div>

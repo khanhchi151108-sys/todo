@@ -17,20 +17,21 @@ export default function Gacha({ user, onClose, onReward }) {
       const isTitle = Math.random() > 0.5;
       const pool = isTitle ? GACHA_POOL.titles : GACHA_POOL.borders;
       
-      // Randomly pick an item from the pool based on basic weight
-      // (Simplified: equal chance for MVP)
       const randomIndex = Math.floor(Math.random() * pool.length);
-      const wonItem = pool[randomIndex];
-      wonItem.type = isTitle ? 'title' : 'border';
+      const wonItem = { ...pool[randomIndex], type: isTitle ? 'title' : 'border' };
 
-      // Save to DB
+      // Save to DB by user.name
       const updateData = isTitle ? { title: wonItem.name } : { border: wonItem.class };
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
         .update(updateData)
         .eq('username', user.name)
         .select()
         .single();
+
+      if (error) {
+        console.error('Gacha DB save error:', error);
+      }
 
       setIsSpinning(false);
       setReward(wonItem);
@@ -41,8 +42,10 @@ export default function Gacha({ user, onClose, onReward }) {
         colors: ['#ff00ff', '#00ffff', '#ffff00']
       });
 
-      if (data) {
+      if (data && onReward) {
         onReward(data);
+      } else if (onReward) {
+        onReward(updateData);
       }
     }, 2000);
   };
@@ -50,7 +53,7 @@ export default function Gacha({ user, onClose, onReward }) {
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
       <div className="game-card max-w-sm w-full text-center relative border-pink-500 shadow-[0_0_20px_rgba(236,72,153,0.3)]">
-        {!isSpinning && !reward && (
+        {!isSpinning && (
           <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white">
             <X size={24} />
           </button>
@@ -60,22 +63,22 @@ export default function Gacha({ user, onClose, onReward }) {
           <div className="animate-fade-in-up py-8">
             <Sparkles size={64} className="mx-auto text-yellow-400 mb-4 animate-spin-slow" />
             <h2 className="text-2xl font-rpg text-yellow-400 mb-2">Chúc mừng!</h2>
-            <p className="mb-4">Bạn đã nhận được {reward.type === 'title' ? 'Danh hiệu' : 'Viền Avatar'}:</p>
+            <p className="mb-4 text-sm">Bạn đã nhận được {reward.type === 'title' ? 'Danh hiệu' : 'Viền Avatar'}:</p>
             <div className={`inline-block p-4 rounded-lg bg-gray-900 border-2 border-gamePrimary mb-6 ${reward.type === 'border' ? reward.class : ''}`}>
-              <span className={`font-bold text-xl ${reward.rarity === 'legendary' ? 'text-yellow-400 animate-pulse' : 'text-gamePrimary'}`}>
+              <span className={`font-bold text-lg ${reward.rarity === 'legendary' ? 'text-yellow-400 animate-pulse' : 'text-gamePrimary'}`}>
                 {reward.name || 'Viền Hiếm'}
               </span>
             </div>
-            <button onClick={onClose} className="btn-primary w-full">Đóng</button>
+            <button onClick={onClose} className="btn-primary w-full">Nhận Thưởng</button>
           </div>
         ) : (
           <div className="py-8">
             <Ticket size={64} className={`mx-auto text-pink-500 mb-6 ${isSpinning ? 'animate-bounce' : ''}`} />
             <h2 className="text-2xl font-rpg text-pink-400 mb-4">Vòng Quay May Mắn</h2>
             {isSpinning ? (
-              <p className="text-xl animate-pulse">Đang quay...</p>
+              <p className="text-lg animate-pulse text-pink-300">Đang quay phần thưởng...</p>
             ) : (
-              <button onClick={drawGacha} className="btn-primary w-full text-lg py-4 flex justify-center gap-2 items-center">
+              <button onClick={drawGacha} className="btn-primary w-full text-base py-3.5 flex justify-center gap-2 items-center">
                 <Sparkles size={20} /> QUAY NGAY
               </button>
             )}

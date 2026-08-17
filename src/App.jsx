@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Sword, Shield, BookOpen, ShoppingBag, Backpack, History, Users } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { BookOpen, ShoppingBag, Backpack, History, Users } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import SidebarProfile from './components/SidebarProfile';
 import TaskList from './components/TaskList';
@@ -8,48 +8,56 @@ import Inventory from './components/Inventory';
 import PomodoroTimer from './components/PomodoroTimer';
 import Gacha from './components/Gacha';
 import Social from './components/Social';
+import AuthModal from './components/AuthModal';
+import Toast from './components/Toast';
 
 export default function App() {
+  const [session, setSession] = useState(null);
   const [user, setUser] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [activeTab, setActiveTab] = useState('tasks');
-  
+  const [loading, setLoading] = useState(true);
+  const [toasts, setToasts] = useState([]);
+
   // Modals state
   const [showPomodoro, setShowPomodoro] = useState(false);
   const [showGacha, setShowGacha] = useState(false);
 
-  useEffect(() => {
-    const savedUser = localStorage.getItem('rpg_user');
-    if (savedUser) {
-      const parsedUser = JSON.parse(savedUser);
-      setUser(parsedUser);
-      fetchData(parsedUser);
-    }
+  // Toast Helper
+  const showToast = useCallback(({ type = 'info', title, message, duration = 4000 }) => {
+    const id = Date.now() + Math.random().toString(36).substring(2, 7);
+    setToasts(prev => [...prev, { id, type, title, message, duration }]);
   }, []);
 
-  const fetchData = async (currentUser) => {
-    // Fetch Tasks
-    const { data: tasksData } = await supabase
-      .from('tasks')
-      .select('*')
-      .eq('user_id', currentUser.name)
-      .order('created_at', { ascending: false });
-      
-    if (tasksData) {
-      setTasks(tasksData);
-      checkOverdueAndSoftDelete(tasksData, currentUser);
+  const removeToast = useCallback((id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  // Update user profile in Supabase (compatible with live database)
+  const updateUserProfile = useCallback(async (updates, targetUsername) => {
+    const username = targetUsername || user?.name;
+    if (!username) return;
+    try {
+      const { data: updatedProfile, error } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('username', username)
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (updatedProfile) {
+        setUser(prev => ({ ...prev, ...updatedProfile }));
+      }
+    } catch (err) {
+      console.error('Update profile error:', err);
     }
+  }, [user?.name]);
 
-    // Fetch Inventory
-    const { data: invData } = await supabase
-      .from('inventory')
-      .select('*')
-      .eq('user_id', currentUser.name);
-    if (invData) setInventory(invData.map(i => i.item_id));
-  };
-
-  const checkOverdueAndSoftDelete = async (currentTasks, currentUser) => {
+  // Batch check overdue and soft delete completed tasks
+  const checkOverdueAndSoftDelete = useCallback(async (currentTasks, currentUser) => {
+    if (!currentUser) return;
     const now = new Date();
     let hpPenalty = 0;
     const tasksToUpdate = [];
@@ -71,63 +79,202 @@ export default function App() {
       return task;
     });
 
-    if (hpPenalty > 0 || tasksToUpdate.length > 0) {
+    if (tasksToUpdate.length > 0 || hpPenalty > 0) {
       setTasks(updatedTasks);
-      
-      for (const update of tasksToUpdate) {
-        await supabase.from('tasks').update(update).eq('id', update.id);
-      }
+
+      // Batch DB update for all changed tasks
+      await Promise.all(
+        tasksToUpdate.map(item =>
+          supabase.from('tasks').update(item).eq('id', item.id)
+        )
+      );
 
       if (hpPenalty > 0) {
-        // Check for streak freeze
         if (currentUser.frozen_days > 0) {
-          alert('Bình Đóng Băng đã phát huy tác dụng! Bạn không bị trừ HP và giữ nguyên Chuỗi ngày.');
+          showToast({
+            type: 'info',
+            title: 'Bình Đóng Băng Kích Hoạt!',
+            message: 'Bình Đóng Băng đã bảo vệ bạn: Không bị trừ HP và giữ nguyên Chuỗi ngày.'
+          });
           const newFrozen = currentUser.frozen_days - 1;
-          await updateUserProfile({ frozen_days: newFrozen });
+          await updateUserProfile({ frozen_days: newFrozen }, currentUser.name);
         } else {
           let newHp = (currentUser.hp || 100) - hpPenalty;
           let newLevel = currentUser.level || 1;
-          let alertMsg = `Bạn bị trừ ${hpPenalty} HP do có task quá hạn!`;
+          let message = `Bạn bị trừ ${hpPenalty} HP do có nhiệm vụ quá hạn!`;
 
           if (newHp <= 0) {
             newHp = 100;
             newLevel = Math.max(1, newLevel - 1);
-            alertMsg += `\n💀 Nhân vật đã kiệt sức. Bị giáng xuống Cấp độ ${newLevel}.`;
+            message += `\n💀 Nhân vật kiệt sức! Bị giáng xuống Cấp độ ${newLevel}.`;
           }
 
-          await updateUserProfile({ hp: newHp, level: newLevel, streak: 0 });
-          alert(alertMsg);
+          await updateUserProfile({ hp: newHp, level: newLevel, streak: 0 }, currentUser.name);
+          showToast({
+            type: 'warning',
+            title: 'Cảnh Báo Quá Hạn',
+            message
+          });
         }
       }
     }
-  };
+  }, [showToast, updateUserProfile]);
 
-  const syncProfile = async (username) => {
-    const { data } = await supabase.from('profiles').select('*').eq('username', username).single();
-    if (!data) {
-      const { data: newProfile } = await supabase.from('profiles').insert([{ username }]).select().single();
-      return newProfile;
+  // Fetch tasks and inventory for authenticated user
+  const fetchData = useCallback(async (currentUser) => {
+    if (!currentUser?.name) return;
+    try {
+      // 1. Fetch Tasks
+      const { data: tasksData, error: tasksError } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('user_id', currentUser.name)
+        .order('created_at', { ascending: false });
+
+      if (tasksError) {
+        console.error('Error fetching tasks:', tasksError);
+      } else if (tasksData) {
+        setTasks(tasksData);
+        checkOverdueAndSoftDelete(tasksData, currentUser);
+      }
+
+      // 2. Fetch Inventory
+      const { data: invData, error: invError } = await supabase
+        .from('inventory')
+        .select('*')
+        .eq('user_id', currentUser.name);
+
+      if (invError) {
+        console.error('Error fetching inventory:', invError);
+      } else if (invData) {
+        setInventory(invData.map(i => i.item_id));
+      }
+    } catch (err) {
+      console.error('Error loading user data:', err);
     }
-    return data;
-  };
+  }, [checkOverdueAndSoftDelete]);
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    const username = e.target.username.value;
-    if (username.trim()) {
-      const profile = await syncProfile(username);
-      const newUser = { name: username, ...profile };
-      setUser(newUser);
-      localStorage.setItem('rpg_user', JSON.stringify(newUser));
-      fetchData(newUser);
+  // Fetch or create profile based on Supabase Auth session
+  const syncProfile = useCallback(async (authUser) => {
+    try {
+      const username = authUser.user_metadata?.username || authUser.email?.split('@')[0] || 'Anh Hùng';
+      
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('username', username)
+        .maybeSingle();
+
+      if (error && error.code !== 'PGRST116') {
+        console.error('Profile fetch error:', error);
+      }
+
+      if (data) {
+        const fullUser = {
+          id: authUser.id,
+          name: data.username,
+          email: authUser.email,
+          ...data
+        };
+        setUser(fullUser);
+        return fullUser;
+      }
+
+      // Insert new profile if not exists
+      const { data: newProfile, error: createError } = await supabase
+        .from('profiles')
+        .insert([{
+          username: username,
+          level: 1,
+          exp: 0,
+          hp: 100,
+          gold: 50,
+          streak: 0,
+          frozen_days: 0,
+          title: 'Tân Binh',
+          double_xp: false
+        }])
+        .select()
+        .single();
+
+      if (createError) {
+        console.warn('Profile create note:', createError);
+      }
+
+      const createdUser = {
+        id: authUser.id,
+        name: newProfile?.username || username,
+        email: authUser.email,
+        level: 1,
+        exp: 0,
+        hp: 100,
+        gold: 50,
+        streak: 0,
+        frozen_days: 0,
+        title: 'Tân Binh',
+        ...(newProfile || {})
+      };
+      setUser(createdUser);
+      return createdUser;
+    } catch (err) {
+      console.error('Profile sync exception:', err);
+      return null;
     }
-  };
+  }, []);
 
-  const handleLogout = () => {
-    setUser(null);
-    setTasks([]);
-    setInventory([]);
-    localStorage.removeItem('rpg_user');
+  // Check auth session on startup and subscribe to auth state changes
+  useEffect(() => {
+    let isMounted = true;
+
+    supabase.auth.getSession().then(async ({ data: { session: currentSession } }) => {
+      if (!isMounted) return;
+      setSession(currentSession);
+      if (currentSession?.user) {
+        const profile = await syncProfile(currentSession.user);
+        if (profile) {
+          await fetchData(profile);
+        }
+      }
+      setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+      if (!isMounted) return;
+      setSession(newSession);
+      if (newSession?.user) {
+        const profile = await syncProfile(newSession.user);
+        if (profile) {
+          await fetchData(profile);
+        }
+      } else {
+        setUser(null);
+        setTasks([]);
+        setInventory([]);
+      }
+      setLoading(false);
+    });
+
+    return () => {
+      isMounted = false;
+      subscription?.unsubscribe();
+    };
+  }, [syncProfile, fetchData]);
+
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      setUser(null);
+      setSession(null);
+      setTasks([]);
+      setInventory([]);
+      showToast({
+        type: 'info',
+        title: 'Đã Đăng Xuất',
+        message: 'Hẹn gặp lại anh hùng trong những chuyến phiêu lưu tiếp theo!'
+      });
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
   };
 
   const calculateReward = (diff, isDoubleXp) => {
@@ -136,6 +283,7 @@ export default function App() {
     switch (diff) {
       case 'Dễ': exp = 10; gold = 5; break;
       case 'Khó': exp = 50; gold = 30; break;
+      default: exp = 25; gold = 15; break;
     }
     if (isDoubleXp) {
       exp *= 2;
@@ -143,178 +291,233 @@ export default function App() {
     return { exp, gold };
   };
 
-  const handleLevelUp = async (currentExp, currentLevel) => {
-    const nextLevelExp = currentLevel * 100;
-    if (currentExp >= nextLevelExp) {
-      alert(`🎉 Chúc mừng! Bạn đã đạt Cấp độ ${currentLevel + 1}!`);
-      return currentLevel + 1;
+  // Level up calculation with overflow EXP
+  const calculateLevelUp = (currentExp, currentLevel) => {
+    let exp = currentExp;
+    let level = currentLevel;
+    let leveledUp = false;
+
+    while (exp >= level * 100) {
+      exp -= level * 100;
+      level += 1;
+      leveledUp = true;
     }
-    return currentLevel;
+
+    return { newExp: exp, newLevel: level, leveledUp };
   };
 
+  // World Boss attack
   const dealBossDamage = async () => {
-    // Basic implementation for Boss fight MVP
-    const { data: boss } = await supabase.from('world_boss').select('*').limit(1).single();
-    if (boss && boss.hp > 0) {
-      const newHp = Math.max(0, boss.hp - 10);
-      await supabase.from('world_boss').update({ hp: newHp }).eq('id', boss.id);
-      if (newHp === 0 && boss.hp > 0) {
-        alert('🎉 BOSS THẾ GIỚI ĐÃ BỊ TIÊU DIỆT! Toàn server nhận được phần thưởng vinh quang!');
+    try {
+      const { data: boss } = await supabase.from('world_boss').select('*').limit(1).maybeSingle();
+      if (boss && boss.hp > 0) {
+        const newHp = Math.max(0, boss.hp - 10);
+        await supabase.from('world_boss').update({ hp: newHp }).eq('id', boss.id);
+        if (newHp === 0 && boss.hp > 0) {
+          showToast({
+            type: 'level-up',
+            title: 'CHIẾN THẮNG HUY HOÀNG!',
+            message: 'Boss Thế Giới đã bị tiêu diệt! Toàn server nhận thưởng vinh quang!'
+          });
+        }
       }
+    } catch (err) {
+      console.warn('Boss damage error:', err);
     }
   };
 
   const addTask = async (taskData) => {
-    if (taskData.id) {
-      const { data } = await supabase
-        .from('tasks')
-        .update({
-          text: taskData.text,
-          difficulty: taskData.difficulty,
-          tag: taskData.tag,
-          deadline: taskData.deadline ? new Date(taskData.deadline).toISOString() : null
-        })
-        .eq('id', taskData.id)
-        .select()
-        .single();
-        
-      if (data) setTasks(tasks.map(t => t.id === taskData.id ? data : t));
-    } else {
-      const { data } = await supabase
-        .from('tasks')
-        .insert([{ 
-          user_id: user.name, 
-          text: taskData.text,
-          difficulty: taskData.difficulty,
-          tag: taskData.tag,
-          deadline: taskData.deadline ? new Date(taskData.deadline).toISOString() : null,
-          type: taskData.type || 'one-time'
-        }])
-        .select()
-        .single();
-      
-      if (data) setTasks([data, ...tasks]);
+    if (!user) return;
+
+    try {
+      if (taskData.id) {
+        const { data, error } = await supabase
+          .from('tasks')
+          .update({
+            text: taskData.text,
+            difficulty: taskData.difficulty,
+            tag: taskData.tag,
+            deadline: taskData.deadline ? new Date(taskData.deadline).toISOString() : null
+          })
+          .eq('id', taskData.id)
+          .select()
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          setTasks(prev => prev.map(t => t.id === taskData.id ? data : t));
+          showToast({ type: 'success', message: 'Đã cập nhật nhiệm vụ.' });
+        }
+      } else {
+        const { data, error } = await supabase
+          .from('tasks')
+          .insert([{
+            user_id: user.name,
+            text: taskData.text,
+            difficulty: taskData.difficulty,
+            tag: taskData.tag,
+            deadline: taskData.deadline ? new Date(taskData.deadline).toISOString() : null,
+            type: taskData.type || 'one-time'
+          }])
+          .select()
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          setTasks(prev => [data, ...prev]);
+          showToast({ type: 'success', message: 'Đã nhận nhiệm vụ mới!' });
+        }
+      }
+    } catch (err) {
+      console.error('Task save error:', err);
+      showToast({ type: 'error', title: 'Lỗi', message: 'Không thể lưu nhiệm vụ. Vui lòng thử lại.' });
     }
   };
 
   const toggleTask = async (task) => {
+    if (!user) return;
     const newCompleted = !task.completed;
     const newStatus = newCompleted ? 'history' : 'active';
-    
-    const { data } = await supabase
-      .from('tasks')
-      .update({ completed: newCompleted, status: newStatus })
-      .eq('id', task.id)
-      .select()
-      .single();
 
-    if (data) {
-      setTasks(tasks.map(t => t.id === task.id ? data : t));
-      
-      if (newCompleted) {
-        const reward = calculateReward(task.difficulty, user.double_xp);
-        let newExp = user.exp + reward.exp;
-        let newGold = user.gold + reward.gold;
-        let newLevel = await handleLevelUp(newExp, user.level);
-        
-        let newStreak = (user.streak || 0) + 1; // Increase streak
-        
-        const updates = { exp: newExp, gold: newGold, level: newLevel, streak: newStreak };
-        if (user.double_xp) {
-          updates.double_xp = false; // Turn off double XP after one use
-          alert('Nhân đôi XP đã được áp dụng!');
+    try {
+      const { data, error } = await supabase
+        .from('tasks')
+        .update({ completed: newCompleted, status: newStatus })
+        .eq('id', task.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        setTasks(prev => prev.map(t => t.id === task.id ? data : t));
+
+        if (newCompleted) {
+          const reward = calculateReward(task.difficulty, user.double_xp);
+          const rawExp = (user.exp || 0) + reward.exp;
+          const { newExp, newLevel, leveledUp } = calculateLevelUp(rawExp, user.level || 1);
+          const newGold = (user.gold || 0) + reward.gold;
+          const newStreak = (user.streak || 0) + 1;
+
+          const updates = { exp: newExp, gold: newGold, level: newLevel, streak: newStreak };
+          if (user.double_xp) {
+            updates.double_xp = false;
+          }
+
+          await updateUserProfile(updates);
+
+          showToast({
+            type: leveledUp ? 'level-up' : 'success',
+            title: leveledUp ? `🎉 LÊN CẤP ${newLevel}!` : 'Nhiệm Vụ Hoàn Thành!',
+            message: `+${reward.exp} EXP | +${reward.gold} 🪙 Gold${user.double_xp ? ' (X2 EXP kích hoạt!)' : ''}`
+          });
+
+          // Attack World Boss
+          dealBossDamage();
         }
-        updateUserProfile(updates);
-        
-        // Attack Boss
-        dealBossDamage();
       }
+    } catch (err) {
+      console.error('Toggle task error:', err);
+      showToast({ type: 'error', message: 'Không thể cập nhật trạng thái nhiệm vụ.' });
     }
   };
 
   const deleteTask = async (id) => {
-    await supabase.from('tasks').delete().eq('id', id);
-    setTasks(tasks.filter(t => t.id !== id));
-  };
-
-  const updateUserProfile = async (updates) => {
-    const { data: updatedProfile } = await supabase
-      .from('profiles')
-      .update(updates)
-      .eq('username', user.name)
-      .select()
-      .single();
-      
-    if (updatedProfile) {
-      const newUser = { ...user, ...updatedProfile };
-      setUser(newUser);
-      localStorage.setItem('rpg_user', JSON.stringify(newUser));
+    try {
+      const { error } = await supabase.from('tasks').delete().eq('id', id);
+      if (error) throw error;
+      setTasks(prev => prev.filter(t => t.id !== id));
+      showToast({ type: 'info', message: 'Đã hủy nhiệm vụ.' });
+    } catch (err) {
+      console.error('Delete task error:', err);
+      showToast({ type: 'error', message: 'Không thể xóa nhiệm vụ.' });
     }
   };
 
+  // Buy item with batched atomic updates
   const buyItem = async (item) => {
-    if (user.gold < item.price) return;
-    
-    await updateUserProfile({ gold: user.gold - item.price });
+    if (!user || user.gold < item.price) {
+      showToast({ type: 'warning', message: 'Bạn không đủ vàng để mua vật phẩm này!' });
+      return;
+    }
 
-    if (item.consumable) {
-      if (item.id === 'health_potion') {
-        const newHp = Math.min(100, (user.hp || 100) + 20);
-        await updateUserProfile({ hp: newHp });
-        alert(`Bạn đã dùng ${item.name} và hồi 20 HP!`);
-      } else if (item.id === 'streak_freeze') {
-        const newFrozen = (user.frozen_days || 0) + 1;
-        await updateUserProfile({ frozen_days: newFrozen });
-        alert('Đã kích hoạt Bình Đóng Băng! Bạn được bảo vệ Streak thêm 1 ngày.');
-      } else if (item.id === 'focus_potion') {
-        setShowPomodoro(true);
-      } else if (item.id === 'gacha_ticket') {
-        setShowGacha(true);
+    try {
+      const newGold = user.gold - item.price;
+
+      if (item.consumable) {
+        if (item.id === 'health_potion') {
+          const newHp = Math.min(100, (user.hp || 100) + 20);
+          await updateUserProfile({ gold: newGold, hp: newHp });
+          showToast({ type: 'success', title: 'Hồi Máu', message: `Đã dùng ${item.name} và hồi 20 HP!` });
+        } else if (item.id === 'streak_freeze') {
+          const newFrozen = (user.frozen_days || 0) + 1;
+          await updateUserProfile({ gold: newGold, frozen_days: newFrozen });
+          showToast({ type: 'success', title: 'Đóng Băng', message: 'Kích hoạt Bình Đóng Băng! Chuỗi ngày được bảo vệ thêm 1 ngày.' });
+        } else if (item.id === 'focus_potion') {
+          await updateUserProfile({ gold: newGold });
+          setShowPomodoro(true);
+        } else if (item.id === 'gacha_ticket') {
+          await updateUserProfile({ gold: newGold });
+          setShowGacha(true);
+        }
+      } else {
+        const { data, error } = await supabase
+          .from('inventory')
+          .insert([{ user_id: user.name, item_id: item.id }])
+          .select()
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          await updateUserProfile({ gold: newGold });
+          setInventory(prev => [...prev, item.id]);
+          showToast({ type: 'success', title: 'Mua Thành Công', message: `Đã trang bị ${item.name} vào Túi Đồ!` });
+        }
       }
-    } else {
-      const { data } = await supabase.from('inventory').insert([{ user_id: user.name, item_id: item.id }]).select().single();
-      if (data) {
-        setInventory([...inventory, item.id]);
-      }
+    } catch (err) {
+      console.error('Buy item error:', err);
+      showToast({ type: 'error', message: 'Giao dịch thất bại. Vui lòng thử lại.' });
     }
   };
 
   const equipItem = async (item) => {
     if (item.consumable) return;
     await updateUserProfile({ equipped_item: item.id });
+    showToast({ type: 'info', message: `Đã trang bị ${item.name}!` });
   };
 
-  if (!user) {
+  if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-full overflow-hidden -z-10">
-          <div className="absolute top-[20%] left-[10%] w-64 h-64 bg-gamePrimary rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse"></div>
-          <div className="absolute top-[40%] right-[10%] w-72 h-72 bg-gameEasy rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse" style={{ animationDelay: '2s' }}></div>
-        </div>
-        <div className="game-card w-full max-w-md animate-fade-in-up">
-          <div className="text-center mb-8">
-            <Sword className="w-16 h-16 mx-auto text-gamePrimary mb-4 animate-bounce" />
-            <h1 className="text-3xl font-rpg text-transparent bg-clip-text bg-gradient-to-r from-gamePrimary to-gameEasy">
-              Quest Log V2
-            </h1>
-            <p className="text-gameText opacity-70 mt-2">Đăng nhập để kết nối server</p>
-          </div>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block mb-2 text-sm font-medium">Tên anh hùng</label>
-              <input type="text" name="username" className="input-field" placeholder="Nhập tên nhân vật..." required />
-            </div>
-            <button type="submit" className="btn-primary w-full flex justify-center items-center gap-2 text-lg py-3">
-              <Shield size={20} /> Đăng nhập
-            </button>
-          </form>
-        </div>
+      <div className="min-h-screen bg-[#1a1a2e] flex flex-col items-center justify-center text-gameText">
+        <div className="w-12 h-12 border-4 border-gamePrimary border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="font-rpg text-sm text-gamePrimary animate-pulse">Đang tải thế giới RPG...</p>
       </div>
+    );
+  }
+
+  // Not authenticated -> Show Auth Modal
+  if (!session || !user) {
+    return (
+      <>
+        <Toast toasts={toasts} removeToast={removeToast} />
+        <AuthModal 
+          onAuthSuccess={async (authUser) => {
+            const profile = await syncProfile(authUser);
+            if (profile) {
+              await fetchData(profile);
+            }
+          }} 
+          showToast={showToast} 
+        />
+      </>
     );
   }
 
   return (
     <div className="h-screen bg-[#1a1a2e] text-gameText p-4 md:p-6 overflow-hidden flex flex-col relative">
+      {/* Toast Notifications */}
+      <Toast toasts={toasts} removeToast={removeToast} />
+
       {/* Modals */}
       {showPomodoro && (
         <PomodoroTimer 
@@ -322,8 +525,12 @@ export default function App() {
           onClose={() => setShowPomodoro(false)} 
           onComplete={(updatedProfile) => {
             setShowPomodoro(false);
-            setUser({ ...user, ...updatedProfile });
-            localStorage.setItem('rpg_user', JSON.stringify({ ...user, ...updatedProfile }));
+            setUser(prev => ({ ...prev, ...updatedProfile }));
+            showToast({
+              type: 'success',
+              title: 'Hoàn Thành Tập Trung!',
+              message: 'Thuốc phát huy tác dụng: Nhận X2 XP cho nhiệm vụ tiếp theo!'
+            });
           }} 
         />
       )}
@@ -333,8 +540,12 @@ export default function App() {
           user={user} 
           onClose={() => setShowGacha(false)}
           onReward={(updatedProfile) => {
-            setUser({ ...user, ...updatedProfile });
-            localStorage.setItem('rpg_user', JSON.stringify({ ...user, ...updatedProfile }));
+            setUser(prev => ({ ...prev, ...updatedProfile }));
+            showToast({
+              type: 'level-up',
+              title: 'Vật Phẩm Mới!',
+              message: 'Chúc mừng bạn đã quay được phần thưởng mới!'
+            });
           }}
         />
       )}

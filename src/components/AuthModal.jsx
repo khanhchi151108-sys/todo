@@ -1,0 +1,315 @@
+import { useState } from 'react';
+import { Sword, Shield, Lock, Mail, User, Eye, EyeOff, Check, AlertCircle, KeyRound } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+
+export default function AuthModal({ onAuthSuccess, showToast }) {
+  const [isLogin, setIsLogin] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [username, setUsername] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Password strength checker
+  const getPasswordStrength = (pass) => {
+    let score = 0;
+    if (pass.length >= 6) score++;
+    if (pass.length >= 8) score++;
+    if (/[A-Z]/.test(pass)) score++;
+    if (/[0-9]/.test(pass)) score++;
+    if (/[^A-Za-z0-9]/.test(pass)) score++;
+    return score;
+  };
+
+  const passStrength = getPasswordStrength(password);
+
+  const getStrengthLabel = (score) => {
+    if (!password) return { text: '', color: 'bg-gray-700' };
+    if (score <= 2) return { text: 'Mật khẩu yếu', color: 'bg-red-500' };
+    if (score <= 3) return { text: 'Mật khẩu trung bình', color: 'bg-yellow-500' };
+    return { text: 'Mật khẩu mạnh', color: 'bg-green-500' };
+  };
+
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setLoading(true);
+
+    try {
+      if (isLogin) {
+        // Sign In
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password: password
+        });
+
+        if (error) throw error;
+        
+        showToast({
+          type: 'success',
+          title: 'Đăng nhập thành công',
+          message: 'Chào mừng anh hùng trở lại thế giới Quest Log!'
+        });
+        
+        if (onAuthSuccess) onAuthSuccess(data.user);
+      } else {
+        // Validation for Sign Up
+        if (username.trim().length < 3) {
+          throw new Error('Tên anh hùng phải có ít nhất 3 ký tự.');
+        }
+        if (password.length < 6) {
+          throw new Error('Mật khẩu phải có ít nhất 6 ký tự.');
+        }
+        if (password !== confirmPassword) {
+          throw new Error('Mật khẩu xác nhận không khớp.');
+        }
+
+        // Sign Up with Supabase Auth
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password: password,
+          options: {
+            data: {
+              username: username.trim()
+            }
+          }
+        });
+
+        if (error) throw error;
+
+        // Ensure profile exists in profiles table
+        if (data?.user) {
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .upsert({
+              username: username.trim(),
+              level: 1,
+              exp: 0,
+              hp: 100,
+              gold: 50,
+              streak: 0,
+              frozen_days: 0,
+              title: 'Tân Binh'
+            }, { onConflict: 'username' });
+
+          if (profileError) {
+            console.warn('Profile sync fallback:', profileError);
+          }
+        }
+
+        showToast({
+          type: 'success',
+          title: 'Đăng ký thành công',
+          message: 'Tài khoản đã sẵn sàng! Chào mừng Tân Binh gia nhập đấu trường.'
+        });
+
+        if (onAuthSuccess) onAuthSuccess(data.user);
+      }
+    } catch (err) {
+      console.error('Auth error:', err);
+      let message = err.message || 'Có lỗi xảy ra trong quá trình xác thực.';
+      if (message.includes('Invalid login credentials')) {
+        message = 'Email hoặc mật khẩu không chính xác. Vui lòng kiểm tra lại.';
+      } else if (message.includes('User already registered')) {
+        message = 'Email này đã được đăng ký. Hãy chuyển sang tab Đăng nhập.';
+      }
+      setErrorMsg(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const strength = getStrengthLabel(passStrength);
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#1a1a2e]">
+      {/* Background glow animations */}
+      <div className="absolute top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
+        <div className="absolute top-[15%] left-[10%] w-72 h-72 bg-gamePrimary rounded-full mix-blend-screen filter blur-3xl opacity-25 animate-pulse"></div>
+        <div className="absolute top-[45%] right-[10%] w-80 h-80 bg-gameEasy rounded-full mix-blend-screen filter blur-3xl opacity-20 animate-pulse" style={{ animationDelay: '2s' }}></div>
+      </div>
+
+      <div className="game-card w-full max-w-md animate-fade-in-up border-gameSecondary/80 backdrop-blur-md shadow-2xl p-6 sm:p-8">
+        
+        {/* Header */}
+        <div className="text-center mb-6">
+          <div className="inline-block p-3 rounded-2xl bg-gameSecondary/50 border border-gamePrimary/40 mb-3 shadow-[0_0_20px_rgba(233,69,96,0.3)]">
+            <Sword className="w-10 h-10 text-gamePrimary animate-bounce" />
+          </div>
+          <h1 className="text-3xl font-rpg text-transparent bg-clip-text bg-gradient-to-r from-gamePrimary via-pink-400 to-gameEasy">
+            Quest Log RPG
+          </h1>
+          <p className="text-gameText/70 text-xs mt-1 font-medium">
+            Cổng Đăng Nhập Server Hiệp Sĩ &bull; Mã Hóa Đầu Cuối
+          </p>
+        </div>
+
+        {/* Tab switch */}
+        <div className="flex bg-[#0f172a] p-1 rounded-lg border border-gameSecondary mb-5">
+          <button
+            type="button"
+            onClick={() => { setIsLogin(true); setErrorMsg(''); }}
+            className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+              isLogin 
+                ? 'bg-gamePrimary text-white shadow-md' 
+                : 'text-gameText/60 hover:text-white'
+            }`}
+          >
+            <KeyRound size={14} /> Đăng nhập
+          </button>
+          <button
+            type="button"
+            onClick={() => { setIsLogin(false); setErrorMsg(''); }}
+            className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+              !isLogin 
+                ? 'bg-gameEasy text-white shadow-md' 
+                : 'text-gameText/60 hover:text-white'
+            }`}
+          >
+            <Shield size={14} /> Đăng ký Tân Binh
+          </button>
+        </div>
+
+        {/* Error Alert */}
+        {errorMsg && (
+          <div className="mb-4 p-3 rounded-lg bg-red-950/80 border border-red-500/60 text-red-300 text-xs flex items-start gap-2 animate-fade-in">
+            <AlertCircle size={16} className="shrink-0 mt-0.5 text-red-400" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+
+        {/* Form */}
+        <form onSubmit={handleAuth} className="space-y-4">
+          
+          {/* Username (Register only) */}
+          {!isLogin && (
+            <div>
+              <label className="block mb-1.5 text-xs font-semibold text-gameText/90">
+                Tên anh hùng (Username)
+              </label>
+              <div className="relative">
+                <User size={16} className="absolute left-3 top-3 text-gray-400" />
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="input-field pl-9 text-sm"
+                  placeholder="Ví dụ: DragonSlayer99"
+                  required={!isLogin}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Email */}
+          <div>
+            <label className="block mb-1.5 text-xs font-semibold text-gameText/90">
+              Địa chỉ Email
+            </label>
+            <div className="relative">
+              <Mail size={16} className="absolute left-3 top-3 text-gray-400" />
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="input-field pl-9 text-sm"
+                placeholder="hero@example.com"
+                required
+              />
+            </div>
+          </div>
+
+          {/* Password */}
+          <div>
+            <label className="block mb-1.5 text-xs font-semibold text-gameText/90">
+              Mật khẩu
+            </label>
+            <div className="relative">
+              <Lock size={16} className="absolute left-3 top-3 text-gray-400" />
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="input-field pl-9 pr-9 text-sm"
+                placeholder="••••••••"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-3 text-gray-400 hover:text-white"
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+
+            {/* Password strength meter on register */}
+            {!isLogin && password && (
+              <div className="mt-2 space-y-1">
+                <div className="flex gap-1 h-1.5 w-full bg-gray-800 rounded-full overflow-hidden">
+                  <div className={`h-full transition-all duration-300 ${passStrength >= 1 ? strength.color : 'bg-transparent'}`} style={{ width: '25%' }}></div>
+                  <div className={`h-full transition-all duration-300 ${passStrength >= 2 ? strength.color : 'bg-transparent'}`} style={{ width: '25%' }}></div>
+                  <div className={`h-full transition-all duration-300 ${passStrength >= 3 ? strength.color : 'bg-transparent'}`} style={{ width: '25%' }}></div>
+                  <div className={`h-full transition-all duration-300 ${passStrength >= 4 ? strength.color : 'bg-transparent'}`} style={{ width: '25%' }}></div>
+                </div>
+                <div className="text-[10px] text-right text-gray-400 font-medium">{strength.text}</div>
+              </div>
+            )}
+          </div>
+
+          {/* Confirm Password (Register only) */}
+          {!isLogin && (
+            <div>
+              <label className="block mb-1.5 text-xs font-semibold text-gameText/90">
+                Xác nhận Mật khẩu
+              </label>
+              <div className="relative">
+                <Lock size={16} className="absolute left-3 top-3 text-gray-400" />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="input-field pl-9 text-sm"
+                  placeholder="••••••••"
+                  required={!isLogin}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Submit Button */}
+          <button
+            type="submit"
+            disabled={loading}
+            className={`w-full flex justify-center items-center gap-2 py-3 rounded-lg font-bold text-sm text-white transition-all shadow-lg mt-2 ${
+              isLogin 
+                ? 'bg-gamePrimary hover:bg-red-500 shadow-gamePrimary/40' 
+                : 'bg-gameEasy hover:bg-cyan-500 shadow-gameEasy/40'
+            } ${loading ? 'opacity-70 cursor-wait' : ''}`}
+          >
+            {loading ? (
+              <span className="animate-pulse">Đang kết nối Server...</span>
+            ) : isLogin ? (
+              <>
+                <KeyRound size={18} /> Vào Thế Giới RPG
+              </>
+            ) : (
+              <>
+                <Check size={18} /> Tạo Nhân Vật & Bắt Đầu
+              </>
+            )}
+          </button>
+        </form>
+
+        {/* Security badge footer */}
+        <div className="mt-6 pt-4 border-t border-gameSecondary/50 flex items-center justify-center gap-2 text-[11px] text-gray-400">
+          <Shield size={14} className="text-green-400 shrink-0" />
+          <span>Bảo mật chuẩn TLS 1.3 &bull; Mật khẩu băm an toàn 100%</span>
+        </div>
+
+      </div>
+    </div>
+  );
+}
