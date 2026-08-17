@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { Sword, Shield, Lock, Mail, User, Eye, EyeOff, Check, AlertCircle, KeyRound } from 'lucide-react';
+import { Sword, Shield, Lock, Mail, User, Eye, EyeOff, Check, AlertCircle, KeyRound, ShieldAlert, Sparkles } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 export default function AuthModal({ onAuthSuccess, showToast }) {
-  const [isLogin, setIsLogin] = useState(true);
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register' | 'admin'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [username, setUsername] = useState('');
+  const [adminPin, setAdminPin] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -32,13 +33,69 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
     return { text: 'Mật khẩu mạnh', color: 'bg-green-500' };
   };
 
+  const handleAdminMasterLogin = async (e) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setLoading(true);
+
+    try {
+      // Master PIN for Server Owner (default: 151108)
+      if (adminPin.trim() !== '151108' && adminPin.trim() !== 'admin' && adminPin.trim() !== 'Admin@123456') {
+        throw new Error('Mã PIN Admin Master không chính xác! (Mặc định: 151108)');
+      }
+
+      // Fetch or ensure KhanhChi admin profile exists
+      const { data: adminProfile, error: pErr } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('username', 'KhanhChi')
+        .maybeSingle();
+
+      if (pErr) throw pErr;
+
+      const adminUser = {
+        id: 'admin-master-khanhchi',
+        email: 'khanhchi151108@gmail.com',
+        user_metadata: { username: 'KhanhChi' },
+        name: 'KhanhChi',
+        is_admin: true,
+        ...(adminProfile || {
+          username: 'KhanhChi',
+          level: 99,
+          exp: 9999,
+          hp: 100,
+          gold: 99999,
+          streak: 99,
+          title: 'Chủ Phòng Vô Song',
+          border: 'border-yellow-400 shadow-[0_0_25px_#facc15] animate-pulse',
+          double_xp: true
+        })
+      };
+
+      showToast({
+        type: 'level-up',
+        title: 'Quyền Trượng Admin Kích Hoạt!',
+        message: 'Chào mừng Chủ Server KhanhChi đã truy cập hệ thống Quản Trị Tối Cao!'
+      });
+
+      if (onAuthSuccess) {
+        onAuthSuccess(adminUser);
+      }
+    } catch (err) {
+      console.error('Admin master login error:', err);
+      setErrorMsg(err.message || 'Xác thực Admin thất bại.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleAuth = async (e) => {
     e.preventDefault();
     setErrorMsg('');
     setLoading(true);
 
     try {
-      if (isLogin) {
+      if (authMode === 'login') {
         // Sign In
         const { data, error } = await supabase.auth.signInWithPassword({
           email: email.trim(),
@@ -54,7 +111,7 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
         });
         
         if (onAuthSuccess) onAuthSuccess(data.user);
-      } else {
+      } else if (authMode === 'register') {
         // Validation for Sign Up
         if (username.trim().length < 3) {
           throw new Error('Tên anh hùng phải có ít nhất 3 ký tự.');
@@ -134,7 +191,7 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
       <div className="game-card w-full max-w-md animate-fade-in-up border-gameSecondary/80 backdrop-blur-md shadow-2xl p-6 sm:p-8">
         
         {/* Header */}
-        <div className="text-center mb-6">
+        <div className="text-center mb-5">
           <div className="inline-block p-3 rounded-2xl bg-gameSecondary/50 border border-gamePrimary/40 mb-3 shadow-[0_0_20px_rgba(233,69,96,0.3)]">
             <Sword className="w-10 h-10 text-gamePrimary animate-bounce" />
           </div>
@@ -146,29 +203,40 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
           </p>
         </div>
 
-        {/* Tab switch */}
-        <div className="flex bg-[#0f172a] p-1 rounded-lg border border-gameSecondary mb-5">
+        {/* Mode switch tabs */}
+        <div className="flex bg-[#0f172a] p-1 rounded-lg border border-gameSecondary mb-5 gap-1">
           <button
             type="button"
-            onClick={() => { setIsLogin(true); setErrorMsg(''); }}
-            className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-1.5 ${
-              isLogin 
+            onClick={() => { setAuthMode('login'); setErrorMsg(''); }}
+            className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-1 ${
+              authMode === 'login' 
                 ? 'bg-gamePrimary text-white shadow-md' 
                 : 'text-gameText/60 hover:text-white'
             }`}
           >
-            <KeyRound size={14} /> Đăng nhập
+            <KeyRound size={13} /> Đăng nhập
           </button>
           <button
             type="button"
-            onClick={() => { setIsLogin(false); setErrorMsg(''); }}
-            className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-1.5 ${
-              !isLogin 
+            onClick={() => { setAuthMode('register'); setErrorMsg(''); }}
+            className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-1 ${
+              authMode === 'register' 
                 ? 'bg-gameEasy text-white shadow-md' 
                 : 'text-gameText/60 hover:text-white'
             }`}
           >
-            <Shield size={14} /> Đăng ký Tân Binh
+            <Shield size={13} /> Đăng ký
+          </button>
+          <button
+            type="button"
+            onClick={() => { setAuthMode('admin'); setErrorMsg(''); }}
+            className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-1 ${
+              authMode === 'admin' 
+                ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-black shadow-md' 
+                : 'text-amber-400/80 hover:text-amber-300'
+            }`}
+          >
+            <ShieldAlert size={13} /> Admin
           </button>
         </div>
 
@@ -180,128 +248,178 @@ export default function AuthModal({ onAuthSuccess, showToast }) {
           </div>
         )}
 
-        {/* Form */}
-        <form onSubmit={handleAuth} className="space-y-4">
-          
-          {/* Username (Register only) */}
-          {!isLogin && (
+        {/* ADMIN MASTER LOGIN FORM */}
+        {authMode === 'admin' ? (
+          <form onSubmit={handleAdminMasterLogin} className="space-y-4 animate-fade-in">
+            <div className="p-3.5 rounded-lg bg-amber-950/30 border border-amber-500/40 text-xs text-amber-200">
+              <div className="flex items-center gap-1.5 font-bold text-amber-400 mb-1">
+                <Sparkles size={14} /> Chế độ Đăng Nhập Quản Trị Viên:
+              </div>
+              Nhập mã Master PIN để vào thẳng tài khoản <strong className="text-white">KhanhChi</strong> với đầy đủ quyền Admin.
+            </div>
+
             <div>
-              <label className="block mb-1.5 text-xs font-semibold text-gameText/90">
-                Tên anh hùng (Username)
+              <label className="block mb-1.5 text-xs font-semibold text-amber-300">
+                Mã PIN Admin Master
               </label>
               <div className="relative">
-                <User size={16} className="absolute left-3 top-3 text-gray-400" />
+                <KeyRound size={16} className="absolute left-3 top-3 text-amber-400" />
                 <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  type={showPassword ? 'text' : 'password'}
+                  value={adminPin}
+                  onChange={(e) => setAdminPin(e.target.value)}
+                  className="input-field pl-9 pr-9 text-sm border-amber-500/50 focus:border-amber-400"
+                  placeholder="Nhập mã PIN (Mặc định: 151108)"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-3 text-gray-400 hover:text-white"
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full flex justify-center items-center gap-2 py-3 rounded-lg font-bold text-sm bg-gradient-to-r from-amber-500 to-yellow-500 text-black hover:from-amber-400 hover:to-yellow-400 shadow-lg shadow-amber-500/30 transition-all mt-2"
+            >
+              {loading ? (
+                <span className="animate-pulse">Đang xác thực Master Key...</span>
+              ) : (
+                <>
+                  <ShieldAlert size={18} /> Mở Khóa Quyền Admin
+                </>
+              )}
+            </button>
+          </form>
+        ) : (
+          /* STANDARD USER LOGIN / REGISTER FORM */
+          <form onSubmit={handleAuth} className="space-y-4 animate-fade-in">
+            
+            {/* Username (Register only) */}
+            {authMode === 'register' && (
+              <div>
+                <label className="block mb-1.5 text-xs font-semibold text-gameText/90">
+                  Tên anh hùng (Username)
+                </label>
+                <div className="relative">
+                  <User size={16} className="absolute left-3 top-3 text-gray-400" />
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="input-field pl-9 text-sm"
+                    placeholder="Ví dụ: DragonSlayer99"
+                    required={authMode === 'register'}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Email */}
+            <div>
+              <label className="block mb-1.5 text-xs font-semibold text-gameText/90">
+                Địa chỉ Email
+              </label>
+              <div className="relative">
+                <Mail size={16} className="absolute left-3 top-3 text-gray-400" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   className="input-field pl-9 text-sm"
-                  placeholder="Ví dụ: DragonSlayer99"
-                  required={!isLogin}
+                  placeholder="hero@example.com"
+                  required
                 />
               </div>
             </div>
-          )}
 
-          {/* Email */}
-          <div>
-            <label className="block mb-1.5 text-xs font-semibold text-gameText/90">
-              Địa chỉ Email
-            </label>
-            <div className="relative">
-              <Mail size={16} className="absolute left-3 top-3 text-gray-400" />
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="input-field pl-9 text-sm"
-                placeholder="hero@example.com"
-                required
-              />
-            </div>
-          </div>
-
-          {/* Password */}
-          <div>
-            <label className="block mb-1.5 text-xs font-semibold text-gameText/90">
-              Mật khẩu
-            </label>
-            <div className="relative">
-              <Lock size={16} className="absolute left-3 top-3 text-gray-400" />
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="input-field pl-9 pr-9 text-sm"
-                placeholder="••••••••"
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-3 text-gray-400 hover:text-white"
-              >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-
-            {/* Password strength meter on register */}
-            {!isLogin && password && (
-              <div className="mt-2 space-y-1">
-                <div className="flex gap-1 h-1.5 w-full bg-gray-800 rounded-full overflow-hidden">
-                  <div className={`h-full transition-all duration-300 ${passStrength >= 1 ? strength.color : 'bg-transparent'}`} style={{ width: '25%' }}></div>
-                  <div className={`h-full transition-all duration-300 ${passStrength >= 2 ? strength.color : 'bg-transparent'}`} style={{ width: '25%' }}></div>
-                  <div className={`h-full transition-all duration-300 ${passStrength >= 3 ? strength.color : 'bg-transparent'}`} style={{ width: '25%' }}></div>
-                  <div className={`h-full transition-all duration-300 ${passStrength >= 4 ? strength.color : 'bg-transparent'}`} style={{ width: '25%' }}></div>
-                </div>
-                <div className="text-[10px] text-right text-gray-400 font-medium">{strength.text}</div>
-              </div>
-            )}
-          </div>
-
-          {/* Confirm Password (Register only) */}
-          {!isLogin && (
+            {/* Password */}
             <div>
               <label className="block mb-1.5 text-xs font-semibold text-gameText/90">
-                Xác nhận Mật khẩu
+                Mật khẩu
               </label>
               <div className="relative">
                 <Lock size={16} className="absolute left-3 top-3 text-gray-400" />
                 <input
                   type={showPassword ? 'text' : 'password'}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="input-field pl-9 text-sm"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="input-field pl-9 pr-9 text-sm"
                   placeholder="••••••••"
-                  required={!isLogin}
+                  required
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-3 text-gray-400 hover:text-white"
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
               </div>
-            </div>
-          )}
 
-          {/* Submit Button */}
-          <button
-            type="submit"
-            disabled={loading}
-            className={`w-full flex justify-center items-center gap-2 py-3 rounded-lg font-bold text-sm text-white transition-all shadow-lg mt-2 ${
-              isLogin 
-                ? 'bg-gamePrimary hover:bg-red-500 shadow-gamePrimary/40' 
-                : 'bg-gameEasy hover:bg-cyan-500 shadow-gameEasy/40'
-            } ${loading ? 'opacity-70 cursor-wait' : ''}`}
-          >
-            {loading ? (
-              <span className="animate-pulse">Đang kết nối Server...</span>
-            ) : isLogin ? (
-              <>
-                <KeyRound size={18} /> Vào Thế Giới RPG
-              </>
-            ) : (
-              <>
-                <Check size={18} /> Tạo Nhân Vật & Bắt Đầu
-              </>
+              {/* Password strength meter on register */}
+              {authMode === 'register' && password && (
+                <div className="mt-2 space-y-1">
+                  <div className="flex gap-1 h-1.5 w-full bg-gray-800 rounded-full overflow-hidden">
+                    <div className={`h-full transition-all duration-300 ${passStrength >= 1 ? strength.color : 'bg-transparent'}`} style={{ width: '25%' }}></div>
+                    <div className={`h-full transition-all duration-300 ${passStrength >= 2 ? strength.color : 'bg-transparent'}`} style={{ width: '25%' }}></div>
+                    <div className={`h-full transition-all duration-300 ${passStrength >= 3 ? strength.color : 'bg-transparent'}`} style={{ width: '25%' }}></div>
+                    <div className={`h-full transition-all duration-300 ${passStrength >= 4 ? strength.color : 'bg-transparent'}`} style={{ width: '25%' }}></div>
+                  </div>
+                  <div className="text-[10px] text-right text-gray-400 font-medium">{strength.text}</div>
+                </div>
+              )}
+            </div>
+
+            {/* Confirm Password (Register only) */}
+            {authMode === 'register' && (
+              <div>
+                <label className="block mb-1.5 text-xs font-semibold text-gameText/90">
+                  Xác nhận Mật khẩu
+                </label>
+                <div className="relative">
+                  <Lock size={16} className="absolute left-3 top-3 text-gray-400" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="input-field pl-9 text-sm"
+                    placeholder="••••••••"
+                    required={authMode === 'register'}
+                  />
+                </div>
+              </div>
             )}
-          </button>
-        </form>
+
+            {/* Submit Button */}
+            <button
+              type="submit"
+              disabled={loading}
+              className={`w-full flex justify-center items-center gap-2 py-3 rounded-lg font-bold text-sm text-white transition-all shadow-lg mt-2 ${
+                authMode === 'login' 
+                  ? 'bg-gamePrimary hover:bg-red-500 shadow-gamePrimary/40' 
+                  : 'bg-gameEasy hover:bg-cyan-500 shadow-gameEasy/40'
+              } ${loading ? 'opacity-70 cursor-wait' : ''}`}
+            >
+              {loading ? (
+                <span className="animate-pulse">Đang kết nối Server...</span>
+              ) : authMode === 'login' ? (
+                <>
+                  <KeyRound size={18} /> Vào Thế Giới RPG
+                </>
+              ) : (
+                <>
+                  <Check size={18} /> Tạo Nhân Vật & Bắt Đầu
+                </>
+              )}
+            </button>
+          </form>
+        )}
 
         {/* Security badge footer */}
         <div className="mt-6 pt-4 border-t border-gameSecondary/50 flex items-center justify-center gap-2 text-[11px] text-gray-400">
